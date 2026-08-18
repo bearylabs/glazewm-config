@@ -1,0 +1,11 @@
+# logs
+*.log
+
+# zebar: vendored pack preview images (bulky, not config)
+zebar/*/resources/
+
+# zebar: vendored widget font files (re-downloaded with each pack install)
+zebar/*/widgets/*/dist/geistMono/
+
+# zebar: local backup files left behind by manual bundle patches
+*.bak
