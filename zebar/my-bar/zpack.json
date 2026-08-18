@@ -1,0 +1,58 @@
+{
+  "$schema": "https://github.com/glzr-io/zebar/raw/v3.1.1/resources/zpack-schema.json",
+  "name": "my-bar",
+  "version": "1.0.0",
+  "description": "Minimal custom bar. Starts empty; widgets get added over time.",
+  "tags": [
+    "bar",
+    "minimal"
+  ],
+  "widgets": [
+    {
+      "name": "bar",
+      "htmlPath": "./widgets/bar/index.html",
+      "zOrder": "normal",
+      "shownInTaskbar": false,
+      "focused": false,
+      "resizable": false,
+      "transparent": true,
+      "includeFiles": [
+        "widgets/bar/**"
+      ],
+      "caching": {
+        "defaultDuration": 604800,
+        "rules": []
+      },
+      "privileges": {
+        "shellCommands": [
+          {
+            "program": "shutdown",
+            "argsRegex": ".*"
+          },
+          {
+            "program": "rundll32.exe",
+            "argsRegex": ".*"
+          }
+        ]
+      },
+      "presets": [
+        {
+          "name": "default",
+          "anchor": "top_center",
+          "offsetX": "0px",
+          "offsetY": "0px",
+          "width": "100%",
+          "height": "28px",
+          "monitorSelection": {
+            "type": "all"
+          },
+          "dockToEdge": {
+            "enabled": true,
+            "edge": "top",
+            "windowMargin": "0px"
+          }
+        }
+      ]
+    }
+  ]
+}

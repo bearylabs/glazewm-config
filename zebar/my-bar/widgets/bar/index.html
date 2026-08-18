@@ -1,0 +1,690 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>my-bar</title>
+    <style>
+      /* Catppuccin Mocha */
+      :root {
+        --ctp-crust: #11111b;
+        --ctp-mantle: #181825;
+        --ctp-base: #1e1e2e;
+        --ctp-surface0: #313244;
+        --ctp-surface1: #45475a;
+        --ctp-surface2: #585b70;
+        --ctp-overlay0: #6c7086;
+        --ctp-overlay1: #7f849c;
+        --ctp-subtext0: #a6adc8;
+        --ctp-subtext1: #bac2de;
+        --ctp-text: #cdd6f4;
+        --ctp-lavender: #b4befe;
+        --ctp-blue: #89b4fa;
+        --ctp-sapphire: #74c7ec;
+        --ctp-teal: #94e2d5;
+        --ctp-green: #a6e3a1;
+        --ctp-yellow: #f9e2af;
+        --ctp-peach: #fab387;
+        --ctp-red: #f38ba8;
+        --ctp-mauve: #cba6f7;
+
+        --bar-bg: var(--ctp-crust);
+        --bar-fg: var(--ctp-text);
+        --bar-pad-x: 8px;
+        --bar-gap: 14px;
+        --bar-font: 12px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+      }
+
+      body {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--bar-gap);
+        padding: 0 var(--bar-pad-x);
+        box-sizing: border-box;
+        background: var(--bar-bg);
+        color: var(--bar-fg);
+        font: var(--bar-font);
+        user-select: none;
+        cursor: default;
+      }
+
+      /* Three zones to drop widgets into. Empty zones collapse to nothing. */
+      .zone {
+        display: flex;
+        align-items: center;
+        gap: var(--bar-gap);
+        min-width: 0;
+      }
+
+      /* Pinned to the middle of the bar rather than to the space left over
+         between the side zones, so the clock never shifts when a workspace
+         appears or the confirm row opens. */
+      .zone--center {
+        position: absolute;
+        left: 50%;
+        top: 0;
+        height: 100%;
+        transform: translateX(-50%);
+        justify-content: center;
+        pointer-events: none;
+      }
+
+
+
+      .zone--right {
+        justify-content: flex-end;
+      }
+
+      /* Tiling direction -- where the next window will be split in. */
+      .split {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 20px;
+        border: none;
+        padding: 0;
+        border-radius: 5px;
+        background: transparent;
+        color: var(--ctp-overlay0);
+        cursor: pointer;
+        transition: background-color 120ms ease, color 120ms ease;
+      }
+
+      .split:hover {
+        background: var(--ctp-surface0);
+        color: var(--ctp-text);
+      }
+
+      .split svg {
+        width: 14px;
+        height: 14px;
+      }
+
+      /* Only the glyph matching the current direction is shown. */
+      .split svg {
+        display: none;
+      }
+
+      .split[data-direction='horizontal'] .split__horizontal,
+      .split[data-direction='vertical'] .split__vertical,
+      .split[data-direction='fullscreen'] .split__fullscreen {
+        display: block;
+      }
+
+      /* Fullscreen has no tiling direction to change, so the glyph reports
+         state instead of acting as a control. */
+      .split[data-direction='fullscreen'] {
+        color: var(--ctp-peach);
+        cursor: default;
+      }
+
+      .split[data-direction='fullscreen']:hover {
+        background: transparent;
+        color: var(--ctp-peach);
+      }
+
+      /* Workspaces -- same metrics and resting colors as the buttons on the
+         right, so both sides read as one control strip. */
+      .workspaces {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+      }
+
+      .workspace {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 22px;
+        height: 20px;
+        padding: 0 6px;
+        border-radius: 5px;
+        box-sizing: border-box;
+        background: transparent;
+        color: var(--ctp-overlay0);
+        font-variant-numeric: tabular-nums;
+        line-height: 1;
+        transition: background-color 120ms ease, color 120ms ease;
+      }
+
+      /* Has windows, but not focused. */
+      .workspace.is-active {
+        color: var(--ctp-subtext0);
+      }
+
+      .workspace:hover {
+        background: var(--ctp-surface0);
+        color: var(--ctp-text);
+      }
+
+      .zone--left {
+        flex: 1;
+        gap: 8px;
+      }
+
+      /* Active GlazeWM binding mode, e.g. "resize". */
+      .modes {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+      }
+
+      .mode {
+        display: flex;
+        align-items: center;
+        height: 20px;
+        color: var(--ctp-peach);
+        font-weight: 600;
+        line-height: 1;
+      }
+
+      /* v1 -- focus reads as the buttons' hover state, accent via text only. */
+      .ws-v1 .workspace.is-focused {
+        background: var(--ctp-surface0);
+        color: var(--ctp-lavender);
+        font-weight: 600;
+      }
+
+      /* v2 -- flat, focus marked by an underline. */
+      .ws-v2 .workspace.is-focused {
+        color: var(--ctp-text);
+        font-weight: 600;
+      }
+
+      .ws-v2 .workspace.is-focused::after {
+        content: '';
+        position: absolute;
+        left: 50%;
+        bottom: 1px;
+        width: 10px;
+        height: 2px;
+        border-radius: 1px;
+        background: var(--ctp-lavender);
+        transform: translateX(-50%);
+      }
+
+      /* v3 -- monochrome, no accent colour at all. */
+      .ws-v3 .workspace.is-focused {
+        background: var(--ctp-surface1);
+        color: var(--ctp-text);
+        font-weight: 600;
+      }
+
+      /* Clock + date */
+      .datetime {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .datetime__item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .datetime__item svg {
+        width: 13px;
+        height: 13px;
+        flex: none;
+      }
+
+      .datetime__item--time svg {
+        color: var(--ctp-blue);
+      }
+
+      .datetime__item--date svg {
+        color: var(--ctp-mauve);
+      }
+
+      .datetime__sep {
+        width: 1px;
+        height: 12px;
+        background: var(--ctp-surface1);
+      }
+
+      /* Power buttons */
+      .actions {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+      }
+
+      .action {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 20px;
+        border: none;
+        padding: 0;
+        border-radius: 5px;
+        background: transparent;
+        color: var(--ctp-subtext0);
+        cursor: pointer;
+        transition: background-color 120ms ease, color 120ms ease;
+      }
+
+      .action svg {
+        width: 14px;
+        height: 14px;
+      }
+
+      .action:hover {
+        background: var(--ctp-surface0);
+        color: var(--ctp-text);
+      }
+
+      .action--power {
+        color: var(--ctp-red);
+      }
+
+      .action--power:hover {
+        background: var(--ctp-red);
+        color: var(--ctp-crust);
+      }
+
+      /* Inline confirmation, shown in place of the buttons. */
+      .confirm {
+        display: none;
+        align-items: center;
+        gap: 6px;
+        padding-left: 4px;
+      }
+
+      .confirm.is-open {
+        display: flex;
+      }
+
+      .confirm__label {
+        color: var(--ctp-text);
+        white-space: nowrap;
+      }
+
+      .confirm__btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 20px;
+        border: none;
+        padding: 0;
+        border-radius: 5px;
+        background: var(--ctp-surface0);
+        cursor: pointer;
+        transition: background-color 120ms ease, color 120ms ease;
+      }
+
+      .confirm__btn svg {
+        width: 13px;
+        height: 13px;
+      }
+
+      .confirm__btn--yes {
+        color: var(--ctp-green);
+      }
+
+      .confirm__btn--yes:hover {
+        background: var(--ctp-green);
+        color: var(--ctp-crust);
+      }
+
+      .confirm__btn--no {
+        color: var(--ctp-red);
+      }
+
+      .confirm__btn--no:hover {
+        background: var(--ctp-red);
+        color: var(--ctp-crust);
+      }
+    </style>
+  </head>
+  <body class="ws-v1">
+    <div class="zone zone--left">
+      <button class="split" id="split" type="button" title="Tiling direction">
+        <!-- next window splits left/right -->
+        <svg class="split__horizontal" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="M12 4v16" />
+        </svg>
+
+        <!-- next window splits top/bottom -->
+        <svg class="split__vertical" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="M3 12h18" />
+        </svg>
+
+        <!-- focused window is fullscreen -->
+        <svg class="split__fullscreen" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+          <path d="M16 3h3a2 2 0 0 1 2 2v3" />
+          <path d="M8 21H5a2 2 0 0 1-2-2v-3" />
+          <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+        </svg>
+      </button>
+      <div class="workspaces" id="workspaces"></div>
+      <div class="modes" id="modes"></div>
+    </div>
+
+    <div class="zone zone--center">
+      <div class="datetime">
+        <div class="datetime__item datetime__item--time">
+          <!-- clock -->
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 2" />
+          </svg>
+          <span id="time">--:--</span>
+        </div>
+
+        <div class="datetime__sep"></div>
+
+        <div class="datetime__item datetime__item--date">
+          <!-- calendar -->
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="5" width="18" height="16" rx="2" />
+            <path d="M3 10h18M8 3v4M16 3v4" />
+          </svg>
+          <span id="date">----.--.--</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="zone zone--right">
+      <div class="actions" id="actions">
+        <button class="action" id="lock" type="button" title="Lock">
+          <!-- padlock -->
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="4" y="10" width="16" height="11" rx="2" />
+            <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+          </svg>
+        </button>
+
+        <button class="action" id="logout" type="button" title="Log out">
+          <!-- arrow leaving a door -->
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+            <path d="M16 17l5-5-5-5" />
+            <path d="M21 12H9" />
+          </svg>
+        </button>
+
+        <button class="action action--power" id="shutdown" type="button" title="Shut down">
+          <!-- power -->
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18.36 6.64a9 9 0 1 1-12.72 0" />
+            <path d="M12 2v10" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="confirm" id="confirm">
+        <span class="confirm__label" id="confirm-label"></span>
+
+        <button class="confirm__btn confirm__btn--yes" id="confirm-yes" type="button" title="Confirm">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M20 6L9 17l-5-5" />
+          </svg>
+        </button>
+
+        <button class="confirm__btn confirm__btn--no" id="confirm-no" type="button" title="Cancel">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6L6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <script type="module">
+      import * as zebar from 'https://esm.sh/zebar@3';
+
+      const providers = zebar.createProviderGroup({
+        // One date provider drives both readouts. `formatting` uses Luxon
+        // tokens; the date line is derived from the same tick.
+        date: { type: 'date', refreshInterval: 1000, formatting: 'HH:mm' },
+        glazewm: { type: 'glazewm' },
+      });
+
+      const timeEl = document.getElementById('time');
+      const dateEl = document.getElementById('date');
+      const workspacesEl = document.getElementById('workspaces');
+      const modesEl = document.getElementById('modes');
+      const splitEl = document.getElementById('split');
+
+      let glazewm = null;
+
+      providers.onOutput(output => {
+        if (output.date) {
+          const now = new Date(output.date.now);
+
+          timeEl.textContent = output.date.formatted;
+          dateEl.textContent = [
+            now.getFullYear(),
+            pad(now.getMonth() + 1),
+            pad(now.getDate()),
+          ].join('.');
+        }
+
+        glazewm = output.glazewm;
+        renderWorkspaces(glazewm);
+        renderModes(glazewm);
+        renderSplit(glazewm);
+      });
+
+      function renderWorkspaces(wm) {
+        if (!wm) {
+          return;
+        }
+
+        workspacesEl.replaceChildren(
+          ...wm.currentWorkspaces.map(workspace => {
+            const el = document.createElement('div');
+
+            el.className = 'workspace';
+            el.classList.toggle('is-focused', workspace.hasFocus);
+            el.classList.toggle(
+              'is-active',
+              !workspace.hasFocus && workspace.children.length > 0,
+            );
+            el.dataset.name = workspace.name;
+            el.textContent = workspace.displayName ?? workspace.name;
+
+            return el;
+          }),
+        );
+      }
+
+      function renderSplit(wm) {
+        if (!wm) {
+          return;
+        }
+
+        // A fullscreen window has no tiling direction to change, so report
+        // that instead.
+        if (isFullscreen) {
+          splitEl.dataset.direction = 'fullscreen';
+          splitEl.title = 'Fullscreen';
+
+          return;
+        }
+
+        splitEl.dataset.direction = wm.tilingDirection ?? '';
+        splitEl.title = `Next split: ${wm.tilingDirection ?? 'unknown'}`;
+      }
+
+      // GlazeWM fires no event when a window's state changes, and zebar's
+      // provider only refreshes `focusedContainer` on focus_changed /
+      // focused_container_moved -- so fullscreen would go unnoticed until the
+      // next workspace switch. Ask GlazeWM directly instead.
+      const WM_QUERY = 'query focused';
+      const WM_POLL_MS = 400;
+
+      let isFullscreen = false;
+      let wmSocket = null;
+
+      function connectWm() {
+        wmSocket = new WebSocket('ws://localhost:6123');
+
+        wmSocket.addEventListener('message', event => {
+          const message = JSON.parse(event.data);
+
+          if (message.clientMessage !== WM_QUERY) {
+            return;
+          }
+
+          const next = message.data?.focused?.state?.type === 'fullscreen';
+
+          if (next !== isFullscreen) {
+            isFullscreen = next;
+            renderSplit(glazewm);
+          }
+        });
+
+        // Zebar restarts leave the socket closed; keep trying.
+        wmSocket.addEventListener('close', () => setTimeout(connectWm, 2000));
+        wmSocket.addEventListener('error', () => wmSocket.close());
+      }
+
+      connectWm();
+
+      setInterval(() => {
+        if (wmSocket?.readyState === WebSocket.OPEN) {
+          wmSocket.send(WM_QUERY);
+        }
+      }, WM_POLL_MS);
+
+      // Click to flip the direction the next window opens in.
+      splitEl.addEventListener('click', () => {
+        if (splitEl.dataset.direction === 'fullscreen') {
+          return;
+        }
+
+        glazewm?.runCommand('toggle-tiling-direction');
+      });
+
+      // Active binding modes plus the paused state, printed the same way.
+      function renderModes(wm) {
+        if (!wm) {
+          return;
+        }
+
+        const labels = wm.bindingModes.map(mode => mode.displayName ?? mode.name);
+
+        if (wm.isPaused) {
+          labels.unshift('pause');
+        }
+
+        modesEl.replaceChildren(
+          ...labels.map(label => {
+            const el = document.createElement('div');
+
+            el.className = 'mode';
+            el.textContent = label;
+
+            return el;
+          }),
+        );
+      }
+
+      function pad(value) {
+        return String(value).padStart(2, '0');
+      }
+
+      // Click a workspace to focus it.
+      workspacesEl.addEventListener('click', event => {
+        const name = event.target.closest('.workspace')?.dataset.name;
+
+        if (name && glazewm) {
+          glazewm.runCommand(`focus --workspace ${name}`);
+        }
+      });
+
+      // --- Lock / log out / shut down -------------------------------------
+
+      const actionsEl = document.getElementById('actions');
+      const confirmEl = document.getElementById('confirm');
+      const confirmLabelEl = document.getElementById('confirm-label');
+
+      // Auto-cancel a pending confirmation, so a stray click can't leave the
+      // bar armed indefinitely.
+      const CONFIRM_TIMEOUT_MS = 8000;
+
+      let pending = null;
+      let pendingTimeout = null;
+
+      const run = (program, args) =>
+        zebar.shellExec(program, args).catch(err => console.error(program, err));
+
+      const lock = () => run('rundll32.exe', ['user32.dll,LockWorkStation']);
+      const logout = () => run('shutdown', ['/l']);
+      const shutdown = () => run('shutdown', ['/s', '/t', '0']);
+
+      // Lock needs no confirmation.
+      document.getElementById('lock').addEventListener('click', lock);
+
+      document
+        .getElementById('logout')
+        .addEventListener('click', () => askConfirm('Log out?', logout));
+
+      document
+        .getElementById('shutdown')
+        .addEventListener('click', () => askConfirm('Shut down?', shutdown));
+
+      document.getElementById('confirm-yes').addEventListener('click', () => {
+        const action = pending;
+
+        closeConfirm();
+        action?.();
+      });
+
+      document.getElementById('confirm-no').addEventListener('click', closeConfirm);
+
+      document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') {
+          closeConfirm();
+        }
+      });
+
+      function askConfirm(label, action) {
+        pending = action;
+        confirmLabelEl.textContent = label;
+        confirmEl.classList.add('is-open');
+        actionsEl.style.display = 'none';
+
+        clearTimeout(pendingTimeout);
+        pendingTimeout = setTimeout(closeConfirm, CONFIRM_TIMEOUT_MS);
+      }
+
+      function closeConfirm() {
+        pending = null;
+        confirmEl.classList.remove('is-open');
+        actionsEl.style.display = '';
+
+        clearTimeout(pendingTimeout);
+      }
+    </script>
+  </body>
+</html>
