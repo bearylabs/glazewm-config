@@ -190,6 +190,22 @@ window_rules:
       # Open MS Teams and Outlook on workspace 2.
       - window_process: { regex: "ms-teams|Teams|OUTLOOK|olk" }
 
+  # Teams call/meeting window. New Teams opens the call in its own
+  # top-level window, but it shares the `TeamsWebView` class with the
+  # main client, so only the title tells them apart. Observed:
+  #   "Meeting with <name> | <org> | <email> | Microsoft Teams"
+  # while the main window reads "Calendar | <org> | ... | Microsoft Teams".
+  #
+  # `title_change` is required: Teams pre-creates the call window hidden and
+  # reuses it, so at `manage` time its title is still the bare
+  # "<org> | <email> | Microsoft Teams" -- the "Meeting with ..." name only
+  # lands ~3s later. Matching on `manage` alone never fires.
+  - commands: ["move --workspace 2", "set-fullscreen"]
+    "on": ["manage", "title_change"]
+    match:
+      - window_process: { equals: "ms-teams" }
+        window_title: { regex: '^(Meeting|Meet now|Call)\b' }
+
   - commands: ["move --workspace 3", "set-fullscreen"]
     match:
       # Force every VS Code window onto workspace 3 and fullscreen, so
