@@ -256,6 +256,100 @@
         background: var(--ctp-surface1);
       }
 
+      /* System load -- same metrics as the clock readouts, so both sides of
+         the bar read the same. */
+      .stats {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .stat {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        color: var(--ctp-subtext0);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .stat svg {
+        width: 13px;
+        height: 13px;
+        flex: none;
+      }
+
+      .stat--cpu svg {
+        color: var(--ctp-sapphire);
+      }
+
+      .stat--mem svg {
+        color: var(--ctp-teal);
+      }
+
+      /* Reserve the width of "100%" so the bar never twitches as the number
+         grows a digit. */
+      .stat__value {
+        min-width: 4ch;
+        text-align: right;
+      }
+
+      /* Load bands -- the icon keeps its hue, only the number reacts. */
+      .stat.is-high .stat__value {
+        color: var(--ctp-peach);
+      }
+
+      .stat.is-critical .stat__value {
+        color: var(--ctp-red);
+      }
+
+      .stat--bat svg {
+        color: var(--ctp-green);
+      }
+
+      /* Charging swaps the whole glyph, the same way the split button swaps
+         its direction icon -- the shell opens up around the bolt so it stays
+         legible at 13px. */
+      .stat--bat .bat__charging,
+      .stat--bat.is-charging .bat__idle {
+        display: none;
+      }
+
+      .stat--bat.is-charging .bat__charging {
+        display: block;
+      }
+
+      /* Battery reads the other way round to load: low is the problem. */
+      .stat--bat.is-low svg {
+        color: var(--ctp-peach);
+      }
+
+      .stat--bat.is-low .stat__value {
+        color: var(--ctp-peach);
+      }
+
+      .stat--bat.is-empty svg {
+        color: var(--ctp-red);
+      }
+
+      .stat--bat.is-empty .stat__value {
+        color: var(--ctp-red);
+      }
+
+      /* Machines without a battery get nothing rather than a dead readout. */
+      .stat--bat {
+        display: none;
+      }
+
+      .stat--bat.is-present {
+        display: flex;
+      }
+
+      .stats__sep {
+        width: 1px;
+        height: 12px;
+        background: var(--ctp-surface1);
+      }
+
       /* Power buttons */
       .actions {
         display: flex;
@@ -409,6 +503,54 @@
     </div>
 
     <div class="zone zone--right">
+      <div class="stats" id="stats">
+        <div class="stat stat--cpu" id="stat-cpu" title="CPU">
+          <!-- processor -->
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="7" y="7" width="10" height="10" rx="1.5" />
+            <path d="M10 2v3M14 2v3M10 19v3M14 19v3M2 10h3M2 14h3M19 10h3M19 14h3" />
+          </svg>
+          <span class="stat__value" id="cpu">--%</span>
+        </div>
+
+        <div class="stat stat--mem" id="stat-mem" title="Memory">
+          <!-- memory module -->
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="7" width="18" height="10" rx="1.5" />
+            <path d="M8 17v3M16 17v3M8 11v2M12 11v2M16 11v2" />
+          </svg>
+          <span class="stat__value" id="mem">--%</span>
+        </div>
+
+        <div class="stat stat--bat" id="stat-bat" title="Battery">
+          <!-- on battery; the inner bar is resized to the charge level -->
+          <svg class="bat__idle" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+               aria-hidden="true">
+            <rect x="2" y="7" width="17" height="10" rx="2.5" />
+            <path d="M22 11v2" />
+            <rect id="bat-fill" x="4.5" y="9.5" width="0" height="5" rx="1"
+                  fill="currentColor" stroke="none" />
+          </svg>
+
+          <!-- charging; same shell, split open around the bolt -->
+          <svg class="bat__charging" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+               aria-hidden="true">
+            <path d="M14.5 7h2a2.5 2.5 0 0 1 2.5 2.5v5a2.5 2.5 0 0 1-2.5 2.5h-2.5" />
+            <path d="M6.5 7H4.5A2.5 2.5 0 0 0 2 9.5v5A2.5 2.5 0 0 0 4.5 17h1" />
+            <path d="M22 11v2" />
+            <path d="M11.5 6.5 8 12h4l-3.5 5.5" />
+          </svg>
+
+          <span class="stat__value" id="bat">--%</span>
+        </div>
+      </div>
+
+      <div class="stats__sep"></div>
+
       <div class="actions" id="actions">
         <button class="action" id="lock" type="button" title="Lock">
           <!-- padlock -->
@@ -466,6 +608,12 @@
         // tokens; the date line is derived from the same tick.
         date: { type: 'date', refreshInterval: 1000, formatting: 'HH:mm' },
         glazewm: { type: 'glazewm' },
+        // Sampling faster than this costs more than the extra resolution is
+        // worth on a bar that's read at a glance.
+        cpu: { type: 'cpu', refreshInterval: 3000 },
+        memory: { type: 'memory', refreshInterval: 3000 },
+        // Charge moves slowly; the plug state is what needs to look live.
+        battery: { type: 'battery', refreshInterval: 15000 },
       });
 
       const timeEl = document.getElementById('time');
@@ -473,6 +621,12 @@
       const workspacesEl = document.getElementById('workspaces');
       const modesEl = document.getElementById('modes');
       const splitEl = document.getElementById('split');
+      const cpuEl = document.getElementById('cpu');
+      const memEl = document.getElementById('mem');
+      const memStatEl = document.getElementById('stat-mem');
+      const batEl = document.getElementById('bat');
+      const batStatEl = document.getElementById('stat-bat');
+      const batFillEl = document.getElementById('bat-fill');
 
       let glazewm = null;
 
@@ -487,6 +641,19 @@
             pad(now.getDate()),
           ].join('.');
         }
+
+        if (output.cpu) {
+          renderStat(cpuEl, output.cpu.usage);
+        }
+
+        if (output.memory) {
+          renderStat(memEl, output.memory.usage);
+          memStatEl.title = `Memory -- ${gib(output.memory.usedMemory)} / ${gib(
+            output.memory.totalMemory,
+          )} GiB`;
+        }
+
+        renderBattery(output.battery);
 
         glazewm = output.glazewm;
         renderWorkspaces(glazewm);
@@ -611,6 +778,71 @@
 
       function pad(value) {
         return String(value).padStart(2, '0');
+      }
+
+      // Load is reported as a whole percent; the bands are wide enough that a
+      // busy compile doesn't paint the bar red on every tick.
+      function renderStat(el, usage) {
+        const percent = Math.round(usage ?? 0);
+        const stat = el.closest('.stat');
+
+        el.textContent = `${percent}%`;
+        stat.classList.toggle('is-high', percent >= 70 && percent < 90);
+        stat.classList.toggle('is-critical', percent >= 90);
+      }
+
+      function gib(bytes) {
+        return (bytes / 1024 ** 3).toFixed(1);
+      }
+
+      // Inner bar spans x 4.5..17.5 inside the 24-unit icon.
+      const BAT_FILL_WIDTH = 13;
+
+      function renderBattery(battery) {
+        // Desktops report no battery at all; keep the readout hidden rather
+        // than printing a permanent 0%.
+        if (typeof battery?.chargePercent !== 'number') {
+          batStatEl.classList.remove('is-present');
+
+          return;
+        }
+
+        const percent = Math.round(battery.chargePercent);
+        // `isCharging` goes false the moment the pack tops off, but the cable
+        // is still in -- `full` should keep the bolt.
+        const charging =
+          battery.isCharging === true || ['charging', 'full'].includes(battery.state);
+
+        batStatEl.classList.add('is-present');
+        batEl.textContent = `${percent}%`;
+        batFillEl.setAttribute(
+          'width',
+          ((BAT_FILL_WIDTH * Math.min(Math.max(percent, 0), 100)) / 100).toFixed(2),
+        );
+
+        batStatEl.classList.toggle('is-charging', charging);
+        batStatEl.classList.toggle('is-low', !charging && percent <= 30 && percent > 15);
+        batStatEl.classList.toggle('is-empty', !charging && percent <= 15);
+
+        batStatEl.title = `Battery -- ${percent}%, ${
+          charging ? 'charging' : battery.state ?? 'discharging'
+        }${remaining(battery, charging)}`;
+      }
+
+      // The provider reports the estimate in milliseconds, and only once the OS
+      // has one to give.
+      function remaining(battery, charging) {
+        const ms = charging ? battery.timeTillFull : battery.timeTillEmpty;
+
+        if (!ms) {
+          return '';
+        }
+
+        const minutesTotal = Math.round(ms / 60000);
+        const hours = Math.floor(minutesTotal / 60);
+        const minutes = minutesTotal % 60;
+
+        return ` (${hours}h ${pad(minutes)}m ${charging ? 'to full' : 'left'})`;
       }
 
       // Click a workspace to focus it.
