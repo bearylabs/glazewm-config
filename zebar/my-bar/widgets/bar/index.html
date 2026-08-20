@@ -293,6 +293,13 @@
         color: var(--ctp-lavender);
       }
 
+      /* The shield is a second glyph rather than a third link icon: the link
+         underneath the tunnel is what the numbers describe. */
+      .stat--net.is-vpn .net__vpn {
+        display: block;
+        color: var(--ctp-mauve);
+      }
+
       .stat--net[data-link='wifi'] .net__wifi,
       .stat--net[data-link='ethernet'] .net__ethernet,
       .stat--net[data-link='none'] .net__none {
@@ -579,6 +586,13 @@
             <path d="M8.5 16.5a5 5 0 0 1 4-1.4" />
             <path d="M12 20h.01" />
             <path d="M16 12l6 6M22 12l-6 6" />
+          </svg>
+
+          <!-- tunnel up; the readout keeps reporting the physical link under it -->
+          <svg class="net__vpn" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3l7 3v5.5c0 4.2-2.9 7.6-7 8.5-4.1-.9-7-4.3-7-8.5V6z" />
+            <path d="M9.5 12l1.8 1.8L15 10" />
           </svg>
 
           <span class="stat__value" id="net-signal">--%</span>
@@ -922,15 +936,23 @@
           return;
         }
 
-        const iface = net.defaultInterface;
+        // A VPN takes over the default route, so `defaultInterface` becomes a
+        // virtual adapter with no radio behind it. The physical link is still
+        // the one that decides how good the connection is, so report that and
+        // mark the tunnel with a badge.
+        const tunnel = isVirtual(net.defaultInterface) ? net.defaultInterface : null;
+        const iface = tunnel ? physicalInterface(net) : net.defaultInterface;
         const link = linkType(iface);
 
         netStatEl.dataset.link = link;
+        netStatEl.classList.toggle('is-vpn', Boolean(tunnel));
 
         if (link === 'none') {
           netSignalEl.textContent = '';
-          netAddrEl.textContent = 'offline';
-          netStatEl.title = 'Network -- disconnected';
+          netAddrEl.textContent = tunnel ? ipv4(tunnel) ?? 'vpn' : 'offline';
+          netStatEl.title = tunnel
+            ? `VPN -- ${tunnel.friendlyName ?? tunnel.name}, no physical link reported`
+            : 'Network -- disconnected';
           netStatEl.classList.remove('is-weak', 'is-poor', 'is-rate');
 
           return;
@@ -966,15 +988,51 @@
           rate ? `${rate} link` : null,
           address,
           iface.friendlyName ?? iface.name,
+          tunnel
+            ? `VPN ${ipv4(tunnel) ?? 'up'} via ${tunnel.friendlyName ?? tunnel.name}`
+            : null,
         ]
           .filter(Boolean)
           .join(' -- ');
       }
 
+      // Tunnels, Hyper-V switches and the like. Windows reports most of them
+      // as plain ethernet, so the adapter name is what gives them away.
+      const VIRTUAL_NAME =
+        /vpn|pangp|globalprotect|anyconnect|zscaler|forticlient|wireguard|openvpn|tailscale|tap-windows|tap|tun|virtual|vethernet|hyper-v|loopback|pseudo/i;
+
+      function isVirtual(iface) {
+        if (!iface) {
+          return false;
+        }
+
+        const type = String(iface.type ?? '').toLowerCase();
+
+        if (['tunnel', 'ppp', 'loopback'].includes(type)) {
+          return true;
+        }
+
+        return VIRTUAL_NAME.test(
+          `${iface.friendlyName ?? ''} ${iface.description ?? ''} ${iface.name ?? ''}`,
+        );
+      }
+
+      // The real link under the tunnel: a radio if there is one, otherwise the
+      // first wired adapter that actually carries an address.
+      function physicalInterface(net) {
+        const candidates = (net.interfaces ?? []).filter(
+          entry => !isVirtual(entry) && ipv4(entry),
+        );
+
+        return (
+          candidates.find(entry => linkType(entry) === 'wifi') ?? candidates[0] ?? null
+        );
+      }
+
       // Speeds arrive in bits per second, and are 0 on adapters that don't
       // report one.
       function linkRate(iface) {
-        const bits = Math.max(iface.receiveSpeed ?? 0, iface.transmitSpeed ?? 0);
+        const bits = Math.max(iface?.receiveSpeed ?? 0, iface?.transmitSpeed ?? 0);
 
         if (!bits) {
           return null;
@@ -1000,7 +1058,7 @@
       // Addresses come back as a list and may carry a /prefix. APIPA means the
       // adapter is up but never got a lease, so it isn't worth printing.
       function ipv4(iface) {
-        return (iface.ipv4Addresses ?? [])
+        return (iface?.ipv4Addresses ?? [])
           .map(entry => String(entry).split('/')[0])
           .find(entry => entry && !entry.startsWith('169.254.') && entry !== '0.0.0.0');
       }
