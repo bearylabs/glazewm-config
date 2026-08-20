@@ -286,6 +286,55 @@
         color: var(--ctp-teal);
       }
 
+      /* Link -- only the glyph matching the current connection is shown, the
+         same way the split button swaps its direction icon. */
+      .stat--net svg {
+        display: none;
+        color: var(--ctp-lavender);
+      }
+
+      .stat--net[data-link='wifi'] .net__wifi,
+      .stat--net[data-link='ethernet'] .net__ethernet,
+      .stat--net[data-link='none'] .net__none {
+        display: block;
+      }
+
+      /* Nothing to report -- neither a signal reading nor a link rate -- so
+         the number collapses rather than printing a placeholder. */
+      .stat--net .stat__value:empty {
+        display: none;
+      }
+
+      /* A link rate is not a quality reading, so it stays the muted colour of
+         the address next to it and never takes a warning band. */
+      .stat--net.is-rate .stat__value {
+        color: var(--ctp-overlay1);
+        min-width: 0;
+      }
+
+      /* The address is reference information, not a reading -- it sits a step
+         back from the numbers next to it. */
+      .stat__addr {
+        color: var(--ctp-overlay1);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* Signal reads the same way round as battery: low is the problem. */
+      .stat--net.is-weak svg,
+      .stat--net.is-weak .stat__value {
+        color: var(--ctp-peach);
+      }
+
+      .stat--net.is-poor svg,
+      .stat--net.is-poor .stat__value {
+        color: var(--ctp-red);
+      }
+
+      .stat--net[data-link='none'] svg,
+      .stat--net[data-link='none'] .stat__addr {
+        color: var(--ctp-red);
+      }
+
       /* Reserve the width of "100%" so the bar never twitches as the number
          grows a digit. */
       .stat__value {
@@ -504,6 +553,38 @@
 
     <div class="zone zone--right">
       <div class="stats" id="stats">
+        <div class="stat stat--net" id="stat-net" data-link="none" title="Network">
+          <!-- wireless -->
+          <svg class="net__wifi" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M2 8.5a15 15 0 0 1 20 0" />
+            <path d="M5 12.5a10 10 0 0 1 14 0" />
+            <path d="M8.5 16.5a5 5 0 0 1 7 0" />
+            <path d="M12 20h.01" />
+          </svg>
+
+          <!-- wired -->
+          <svg class="net__ethernet" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="6" y="13" width="12" height="8" rx="1.5" />
+            <path d="M9 13v-2M12 13v-2M15 13v-2" />
+            <path d="M12 11V3" />
+            <path d="M8 6h8" />
+          </svg>
+
+          <!-- no link -->
+          <svg class="net__none" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 12.5a10 10 0 0 1 8-2.9" />
+            <path d="M8.5 16.5a5 5 0 0 1 4-1.4" />
+            <path d="M12 20h.01" />
+            <path d="M16 12l6 6M22 12l-6 6" />
+          </svg>
+
+          <span class="stat__value" id="net-signal">--%</span>
+          <span class="stat__addr" id="net-addr">--</span>
+        </div>
+
         <div class="stat stat--cpu" id="stat-cpu" title="CPU">
           <!-- processor -->
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -614,6 +695,9 @@
         memory: { type: 'memory', refreshInterval: 3000 },
         // Charge moves slowly; the plug state is what needs to look live.
         battery: { type: 'battery', refreshInterval: 15000 },
+        // Address and link type rarely change; the signal reading is the only
+        // part that moves, and it moves slowly enough to poll at this rate.
+        network: { type: 'network', refreshInterval: 5000 },
       });
 
       const timeEl = document.getElementById('time');
@@ -627,6 +711,9 @@
       const batEl = document.getElementById('bat');
       const batStatEl = document.getElementById('stat-bat');
       const batFillEl = document.getElementById('bat-fill');
+      const netStatEl = document.getElementById('stat-net');
+      const netSignalEl = document.getElementById('net-signal');
+      const netAddrEl = document.getElementById('net-addr');
 
       let glazewm = null;
 
@@ -654,6 +741,7 @@
         }
 
         renderBattery(output.battery);
+        renderNetwork(output.network);
 
         glazewm = output.glazewm;
         renderWorkspaces(glazewm);
@@ -827,6 +915,94 @@
         batStatEl.title = `Battery -- ${percent}%, ${
           charging ? 'charging' : battery.state ?? 'discharging'
         }${remaining(battery, charging)}`;
+      }
+
+      function renderNetwork(net) {
+        if (!net) {
+          return;
+        }
+
+        const iface = net.defaultInterface;
+        const link = linkType(iface);
+
+        netStatEl.dataset.link = link;
+
+        if (link === 'none') {
+          netSignalEl.textContent = '';
+          netAddrEl.textContent = 'offline';
+          netStatEl.title = 'Network -- disconnected';
+          netStatEl.classList.remove('is-weak', 'is-poor', 'is-rate');
+
+          return;
+        }
+
+        const address = ipv4(iface);
+        const ssid = net.defaultGateway?.ssid;
+        // Only the gateway entry carries the reading on Windows; fall back to
+        // the interface in case a future provider version moves it.
+        const signal = net.defaultGateway?.signalStrength ?? iface.signalStrength;
+        const hasSignal = typeof signal === 'number';
+        const percent = hasSignal ? Math.round(signal) : null;
+        // Windows only hands out signal quality to callers allowed to use
+        // location services; where that's switched off the reading is simply
+        // absent, so the negotiated link rate stands in for it.
+        const rate = linkRate(iface);
+
+        netAddrEl.textContent = address ?? '--';
+        netSignalEl.textContent = hasSignal ? `${percent}%` : rate ?? '';
+
+        netStatEl.classList.toggle('is-rate', !hasSignal);
+        netStatEl.classList.toggle(
+          'is-weak',
+          hasSignal && percent <= 50 && percent > 25,
+        );
+        netStatEl.classList.toggle('is-poor', hasSignal && percent <= 25);
+
+        netStatEl.title = [
+          link === 'wifi' ? ssid ?? 'Wi-Fi' : 'Ethernet',
+          hasSignal
+            ? `${percent}% signal`
+            : 'signal quality unavailable (Windows location services off)',
+          rate ? `${rate} link` : null,
+          address,
+          iface.friendlyName ?? iface.name,
+        ]
+          .filter(Boolean)
+          .join(' -- ');
+      }
+
+      // Speeds arrive in bits per second, and are 0 on adapters that don't
+      // report one.
+      function linkRate(iface) {
+        const bits = Math.max(iface.receiveSpeed ?? 0, iface.transmitSpeed ?? 0);
+
+        if (!bits) {
+          return null;
+        }
+
+        return bits >= 1e9
+          ? `${(bits / 1e9).toFixed(bits % 1e9 ? 1 : 0)} Gb/s`
+          : `${Math.round(bits / 1e6)} Mb/s`;
+      }
+
+      // The provider reports a long enum of adapter types; everything that
+      // isn't a radio is drawn as a wired link.
+      function linkType(iface) {
+        if (!iface) {
+          return 'none';
+        }
+
+        const type = String(iface.type ?? '').toLowerCase();
+
+        return /wifi|wireless|802\.11/.test(type) ? 'wifi' : 'ethernet';
+      }
+
+      // Addresses come back as a list and may carry a /prefix. APIPA means the
+      // adapter is up but never got a lease, so it isn't worth printing.
+      function ipv4(iface) {
+        return (iface.ipv4Addresses ?? [])
+          .map(entry => String(entry).split('/')[0])
+          .find(entry => entry && !entry.startsWith('169.254.') && entry !== '0.0.0.0');
       }
 
       // The provider reports the estimate in milliseconds, and only once the OS
