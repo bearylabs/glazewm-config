@@ -286,6 +286,31 @@
         color: var(--ctp-teal);
       }
 
+      .stat--disk svg {
+        color: var(--ctp-blue);
+      }
+
+      .stat--vol svg {
+        color: var(--ctp-yellow);
+      }
+
+      /* Muted swaps the whole glyph the way charging does on the battery, and
+         steps the number back -- the level is still reported, it just isn't
+         coming out of the speakers. */
+      .stat--vol .vol__muted,
+      .stat--vol.is-muted .vol__on {
+        display: none;
+      }
+
+      .stat--vol.is-muted .vol__muted {
+        display: block;
+      }
+
+      .stat--vol.is-muted svg,
+      .stat--vol.is-muted .stat__value {
+        color: var(--ctp-overlay1);
+      }
+
       /* Link -- only the glyph matching the current connection is shown, the
          same way the split button swaps its direction icon. */
       .stat--net svg {
@@ -560,6 +585,25 @@
 
     <div class="zone zone--right">
       <div class="stats" id="stats">
+        <div class="stat stat--vol" id="stat-vol" title="Volume">
+          <!-- output level -->
+          <svg class="vol__on" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M11 5 6 9H2v6h4l5 4z" />
+            <path d="M15.5 8.8a4 4 0 0 1 0 6.4" />
+            <path d="M18.5 6a8 8 0 0 1 0 12" />
+          </svg>
+
+          <!-- muted; same cone, waves replaced by a cross -->
+          <svg class="vol__muted" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M11 5 6 9H2v6h4l5 4z" />
+            <path d="M22 9l-6 6M16 9l6 6" />
+          </svg>
+
+          <span class="stat__value" id="vol">--%</span>
+        </div>
+
         <div class="stat stat--net" id="stat-net" data-link="none" title="Network">
           <!-- wireless -->
           <svg class="net__wifi" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -617,6 +661,17 @@
             <path d="M8 17v3M16 17v3M8 11v2M12 11v2M16 11v2" />
           </svg>
           <span class="stat__value" id="mem">--%</span>
+        </div>
+
+        <div class="stat stat--disk" id="stat-disk" title="Disk">
+          <!-- drive case, split lid over the connector row -->
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+            <path d="M22 12H2" />
+            <path d="M6 16h.01M10 16h.01" />
+          </svg>
+          <span class="stat__value" id="disk">--%</span>
         </div>
 
         <div class="stat stat--bat" id="stat-bat" title="Battery">
@@ -712,6 +767,11 @@
         // Address and link type rarely change; the signal reading is the only
         // part that moves, and it moves slowly enough to poll at this rate.
         network: { type: 'network', refreshInterval: 5000 },
+        // Volume is pushed on every change, so there is nothing to poll.
+        audio: { type: 'audio' },
+        // Free space moves in minutes rather than seconds, and enumerating the
+        // volumes is the most expensive sample on the bar.
+        disk: { type: 'disk', refreshInterval: 60000 },
       });
 
       const timeEl = document.getElementById('time');
@@ -728,6 +788,10 @@
       const netStatEl = document.getElementById('stat-net');
       const netSignalEl = document.getElementById('net-signal');
       const netAddrEl = document.getElementById('net-addr');
+      const volEl = document.getElementById('vol');
+      const volStatEl = document.getElementById('stat-vol');
+      const diskEl = document.getElementById('disk');
+      const diskStatEl = document.getElementById('stat-disk');
 
       let glazewm = null;
 
@@ -754,6 +818,8 @@
           )} GiB`;
         }
 
+        renderVolume(output.audio);
+        renderDisk(output.disk);
         renderBattery(output.battery);
         renderNetwork(output.network);
 
@@ -884,13 +950,78 @@
 
       // Load is reported as a whole percent; the bands are wide enough that a
       // busy compile doesn't paint the bar red on every tick.
-      function renderStat(el, usage) {
+      const LOAD_BANDS = { high: 70, critical: 90 };
+
+      // A disk sits near its high-water mark for weeks, so a load band would
+      // leave it permanently coloured. It only warns once space is short.
+      const DISK_BANDS = { high: 85, critical: 95 };
+
+      function renderStat(el, usage, bands = LOAD_BANDS) {
         const percent = Math.round(usage ?? 0);
         const stat = el.closest('.stat');
 
         el.textContent = `${percent}%`;
-        stat.classList.toggle('is-high', percent >= 70 && percent < 90);
-        stat.classList.toggle('is-critical', percent >= 90);
+        stat.classList.toggle(
+          'is-high',
+          percent >= bands.high && percent < bands.critical,
+        );
+        stat.classList.toggle('is-critical', percent >= bands.critical);
+      }
+
+      function renderVolume(audio) {
+        const device = audio?.defaultPlaybackDevice;
+
+        // Between device switches there is no default at all; keep the last
+        // reading rather than printing a 0% that isn't true.
+        if (!device) {
+          return;
+        }
+
+        const percent = Math.round(device.volume ?? 0);
+
+        volEl.textContent = `${percent}%`;
+        volStatEl.classList.toggle('is-muted', device.isMuted === true);
+        volStatEl.title = `Volume -- ${percent}%${
+          device.isMuted ? ', muted' : ''
+        } (${device.name})`;
+      }
+
+      function renderDisk(disk) {
+        const os = osDisk(disk);
+        const total = os?.totalSpace?.bytes ?? 0;
+
+        if (!total) {
+          return;
+        }
+
+        const free = os.availableSpace?.bytes ?? 0;
+        const used = ((total - free) / total) * 100;
+
+        renderStat(diskEl, used, DISK_BANDS);
+
+        diskStatEl.title = `Disk ${os.mountPoint} -- ${Math.round(
+          used,
+        )}% used, ${iec(os.availableSpace)} free of ${iec(os.totalSpace)}`;
+      }
+
+      // The provider reports every mounted volume, and the bar has room for
+      // one. Windows keeps the system drive in %SystemDrive%, which a widget
+      // can't read, so match the conventional letter and fall back to the
+      // first fixed disk.
+      function osDisk(disk) {
+        const disks = disk?.disks ?? [];
+
+        return (
+          disks.find(entry => entry.mountPoint?.toUpperCase().startsWith('C:')) ??
+          disks.find(entry => !entry.isRemovable) ??
+          null
+        );
+      }
+
+      // Sizes arrive pre-scaled, so a 2 TiB volume doesn't print as four
+      // digits of GiB.
+      function iec(measure) {
+        return measure ? `${measure.iecValue.toFixed(1)} ${measure.iecUnit}` : '?';
       }
 
       function gib(bytes) {
