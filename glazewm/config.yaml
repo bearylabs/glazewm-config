@@ -214,6 +214,24 @@ window_rules:
       # GlazeWM workspace numbers.
       - window_process: { equals: "Code" }
 
+  # WSLg apps run under `msrdc` (RemoteApp/RAIL): one process, one visible
+  # app window of class `RAIL_WINDOW` plus a dozen hidden helpers. Managing
+  # the helpers breaks the WSLg launch handshake, so ignore all but the app.
+  - commands: ["ignore"]
+    match:
+      - window_process: { equals: "msrdc" }
+        window_class: { not_regex: "^RAIL_WINDOW$" }
+
+  # Tiling the app window breaks the launch handshake too, so leave it
+  # floating and bare. `set-fullscreen` maximizes it onto the full monitor
+  # rect (it is a `WS_POPUP` without caption), covering Zebar and leaving a
+  # black band. Explicit `--x-pos/--width/...` did not hold; `100%` sizes
+  # wedge the Wayland surface until the app is restarted.
+  - commands: ["set-floating"]
+    match:
+      - window_process: { equals: "msrdc" }
+        window_class: { equals: "RAIL_WINDOW" }
+
 binding_modes:
   # When enabled, the focused window can be resized via arrow keys or HJKL.
   - name: "resize"
@@ -338,6 +356,22 @@ keybindings:
   # Launch VsCode
   - commands: ["shell-exec code"]
     bindings: ["alt+m"]
+
+  # Launch Doom Emacs from the NixOS WSL distro as a WSLg window. `wslg.exe`
+  # is used instead of `wsl.exe` because it runs on the GUI subsystem and
+  # therefore leaves no console window behind. It is not on PATH, and the
+  # `%ProgramFiles%` form keeps the space in the path out of GlazeWM's
+  # argument splitting -- the variable is only expanded when the command is
+  # actually executed.
+  #
+  # Plain `emacs` is the launcher, not `doom run`: Doom deprecated `doom run`
+  # in 2.1.0 in favour of `emacs`, and its deprecation notice blocks on stdin,
+  # which `wslg.exe` does not provide -- the process then hangs forever
+  # without ever showing a window. The NixOS wrapper already points `emacs` at
+  # the Doom config (`--init-directory /home/hrudek/.config/emacs`), so every
+  # keypress starts a fresh Doom instance; no daemon involved.
+  - commands: ["shell-exec %ProgramFiles%/WSL/wslg.exe -d NixOS -- emacs"]
+    bindings: ["alt+shift+m"]
 
   # Focus the next/previous active workspace defined in `workspaces` config.
   # - commands: ["focus --next-active-workspace"]
