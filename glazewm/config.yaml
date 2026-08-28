@@ -190,28 +190,10 @@ window_rules:
       # Open MS Teams and Outlook on workspace 2.
       - window_process: { regex: "ms-teams|Teams|OUTLOOK|olk" }
 
-  # Teams call/meeting window. New Teams opens the call in its own
-  # top-level window, but it shares the `TeamsWebView` class with the
-  # main client, so only the title tells them apart. Observed:
-  #   "Meeting with <name> | <org> | <email> | Microsoft Teams"
-  # while the main window reads "Calendar | <org> | ... | Microsoft Teams".
-  #
-  # `title_change` is required: Teams pre-creates the call window hidden and
-  # reuses it, so at `manage` time its title is still the bare
-  # "<org> | <email> | Microsoft Teams" -- the "Meeting with ..." name only
-  # lands ~3s later. Matching on `manage` alone never fires.
-  - commands: ["move --workspace 2", "set-fullscreen"]
-    "on": ["manage", "title_change"]
-    match:
-      - window_process: { equals: "ms-teams" }
-        window_title: { regex: '^(Meeting|Meet now|Call)\b' }
 
-  - commands: ["move --workspace 3", "set-fullscreen"]
+  - commands: ["move --workspace 3"]
     match:
-      # Force every VS Code window onto workspace 3 and fullscreen, so
-      # alt+3 always brings VS Code to front. Switching between projects
-      # happens inside VS Code itself (Quick Switch Window), not via
-      # GlazeWM workspace numbers.
+      # Force every VS Code window onto workspace 3 
       - window_process: { equals: "Code" }
 
   # WSLg apps run under `msrdc` (RemoteApp/RAIL): one process, one visible
@@ -223,10 +205,7 @@ window_rules:
         window_class: { not_regex: "^RAIL_WINDOW$" }
 
   # Tiling the app window breaks the launch handshake too, so leave it
-  # floating and bare. `set-fullscreen` maximizes it onto the full monitor
-  # rect (it is a `WS_POPUP` without caption), covering Zebar and leaving a
-  # black band. Explicit `--x-pos/--width/...` did not hold; `100%` sizes
-  # wedge the Wayland surface until the app is restarted.
+  # floating and bare.
   - commands: ["set-floating"]
     match:
       - window_process: { equals: "msrdc" }
@@ -355,23 +334,12 @@ keybindings:
 
   # Launch VsCode
   - commands: ["shell-exec code"]
-    bindings: ["alt+m"]
+    bindings: ["f1"]
 
-  # Launch Doom Emacs from the NixOS WSL distro as a WSLg window. `wslg.exe`
-  # is used instead of `wsl.exe` because it runs on the GUI subsystem and
-  # therefore leaves no console window behind. It is not on PATH, and the
-  # `%ProgramFiles%` form keeps the space in the path out of GlazeWM's
-  # argument splitting -- the variable is only expanded when the command is
-  # actually executed.
-  #
-  # Plain `emacs` is the launcher, not `doom run`: Doom deprecated `doom run`
-  # in 2.1.0 in favour of `emacs`, and its deprecation notice blocks on stdin,
-  # which `wslg.exe` does not provide -- the process then hangs forever
-  # without ever showing a window. The NixOS wrapper already points `emacs` at
-  # the Doom config (`--init-directory /home/hrudek/.config/emacs`), so every
-  # keypress starts a fresh Doom instance; no daemon involved.
-  - commands: ["shell-exec %ProgramFiles%/WSL/wslg.exe -d NixOS -- emacs"]
-    bindings: ["alt+shift+m"]
+  # Launch Doom Emacs from the NixOS WSL distro as a WSLg window
+  - commands:
+      - "shell-exec %ProgramFiles%/WSL/wslg.exe -d NixOS -- emacs"
+    bindings: ["f2"]
 
   # Focus the next/previous active workspace defined in `workspaces` config.
   # - commands: ["focus --next-active-workspace"]
