@@ -197,10 +197,9 @@ window_rules:
       # Open MS Teams and Outlook on workspace 2.
       - window_process: { regex: "ms-teams|Teams|OUTLOOK|olk" }
 
-
   - commands: ["move --workspace 3"]
     match:
-      # Force every VS Code window onto workspace 3 
+      # Force every VS Code window onto workspace 3
       - window_process: { equals: "Code" }
 
   # WSLg apps run under `msrdc` (RemoteApp/RAIL): one visible app window of
@@ -347,8 +346,7 @@ keybindings:
   #   bindings: ["f2"]
 
   # Launch Doom Emacs TUI in a terminal inside NixOS WSL
-  - commands:
-        - "shell-exec wt.exe -w -1 new-tab wsl.exe -d NixOS -- emacs -nw"
+  - commands: ["shell-exec wt.exe -w -1 new-tab wsl.exe -d NixOS -- emacs -nw"]
     bindings: ["f2"]
 
   # Focus the next/previous active workspace defined in `workspaces` config.
