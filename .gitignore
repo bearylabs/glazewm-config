@@ -9,3 +9,7 @@ zebar/*/widgets/*/dist/geistMono/
 
 # zebar: local backup files left behind by manual bundle patches
 *.bak
+
+# Local GlazeWM dev build (upstream + local patches)
+glazewm-dev/**
+
