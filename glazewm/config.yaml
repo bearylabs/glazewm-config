@@ -234,165 +234,165 @@ binding_modes:
 keybindings:
   # Shift focus in a given direction.
   - commands: ["focus --direction left"]
-    bindings: ["ralt+h", "ralt+left"]
+    bindings: ["f19+h", "f20"]
   - commands: ["focus --direction right"]
-    bindings: ["ralt+l", "ralt+right"]
+    bindings: ["f19+l", "f21"]
   - commands: ["focus --direction up"]
-    bindings: ["ralt+k", "ralt+up"]
+    bindings: ["f19+k", "f22"]
   - commands: ["focus --direction down"]
-    bindings: ["ralt+j", "ralt+down"]
+    bindings: ["f19+j", "f23"]
 
   # Move focused window in a given direction.
   - commands: ["move --direction left"]
-    bindings: ["ralt+shift+h", "ralt+shift+left"]
+    bindings: ["f19+shift+h", "shift+f20"]
   - commands: ["move --direction right"]
-    bindings: ["ralt+shift+l", "ralt+shift+right"]
+    bindings: ["f19+shift+l", "shift+f21"]
   - commands: ["move --direction up"]
-    bindings: ["ralt+shift+k", "ralt+shift+up"]
+    bindings: ["f19+shift+k", "shift+f22"]
   - commands: ["move --direction down"]
-    bindings: ["ralt+shift+j", "ralt+shift+down"]
+    bindings: ["f19+shift+j", "shift+f23"]
 
   # Resize focused window by a percentage or pixel amount.
   - commands: ["resize --width -2%"]
-    bindings: ["ralt+u"]
+    bindings: ["f19+u"]
   - commands: ["resize --width +2%"]
-    bindings: ["ralt+p"]
+    bindings: ["f19+p"]
   - commands: ["resize --height +2%"]
-    bindings: ["ralt+o"]
+    bindings: ["f19+o"]
   - commands: ["resize --height -2%"]
-    bindings: ["ralt+i"]
+    bindings: ["f19+i"]
 
   # As an alternative to the resize keybindings above, resize mode enables
   # resizing via arrow keys or HJKL. The binding mode is defined above with
   # the name 'resize'.
   - commands: ["wm-enable-binding-mode --name resize"]
-    bindings: ["ralt+r"]
+    bindings: ["f19+r"]
 
-  # Disables window management and all other keybindings until ralt+shift+p
+  # Disables window management and all other keybindings until f19+shift+p
   # is pressed again.
   - commands: ["wm-toggle-pause"]
-    bindings: ["ralt+shift+p"]
+    bindings: ["f19+shift+p"]
 
   # Change tiling direction. This determines where new tiling windows will
   # be inserted. Set the direction explicitly instead of toggling it.
   - commands: ["set-tiling-direction horizontal"]
-    bindings: ["ralt+b"]
+    bindings: ["f19+b"]
   - commands: ["set-tiling-direction vertical"]
-    bindings: ["ralt+v"]
+    bindings: ["f19+v"]
   - commands: ["toggle-tiling-direction"]
-    bindings: ["ralt+e"]
+    bindings: ["f19+e"]
 
   # Change focus from tiling windows -> floating -> fullscreen.
   # - commands: ["wm-cycle-focus"]
-  #   bindings: ["ralt+space"]
+  #   bindings: ["f19+space"]
 
   # Change the focused window to be floating.
   - commands: ["toggle-floating --centered"]
-    bindings: ["ralt+shift+space"]
+    bindings: ["f19+shift+space"]
 
   # Change the focused window opacity.
   # - commands: ["set-transparency --opacity 100%"]
-  #   bindings: ["ralt+shift+x"]
+  #   bindings: ["f19+shift+x"]
 
   # Change the focused window opacity.
   # - commands: ["set-transparency --opacity 95%"]
-  #   bindings: ["ralt+shift+y"]
+  #   bindings: ["f19+shift+y"]
 
   # Change the focused window to be tiling.
   # - commands: ["toggle-tiling"]
-  #  bindings: ["ralt+t"]
+  #  bindings: ["f19+t"]
 
   # Change the focused window to be fullscreen.
   - commands: ["toggle-fullscreen"]
-    bindings: ["ralt+f"]
+    bindings: ["f19+f"]
 
   # Minimize focused window.
   # - commands: ["toggle-minimized"]
-  #  bindings: ["ralt+m"]
+  #  bindings: ["f19+m"]
 
   # Close focused window.
   - commands: ["close"]
-    bindings: ["ralt+shift+q"]
+    bindings: ["f19+shift+q"]
 
   # Kill GlazeWM process safely.
   # - commands: ["wm-exit"]
-  #   bindings: ["ralt+shift+e"]
+  #   bindings: ["f19+shift+e"]
 
   # Re-evaluate configuration file.
   - commands: ["wm-reload-config"]
-    bindings: ["ralt+shift+c"]
+    bindings: ["f19+shift+c"]
 
   # Redraw all windows.
   - commands: ["wm-redraw"]
-    bindings: ["ralt+shift+w"]
+    bindings: ["f19+shift+w"]
 
   # Launch CMD terminal. Alternatively, use `shell-exec wt` or
   # `shell-exec %ProgramFiles%/Git/git-bash.exe` to start Windows
   # Terminal and Git Bash respectively.
   - commands: ["shell-exec wt"]
-    bindings: ["ralt+enter"]
+    bindings: ["f19+enter"]
 
   # Launch other programms
   # - commands: ["shell-exec explorer"]
-  #   bindings: ["ralt+e"]
+  #   bindings: ["f19+e"]
 
   # Focus the next/previous active workspace defined in `workspaces` config.
   # - commands: ["focus --next-active-workspace"]
-  #   bindings: ["ralt+s"]
+  #   bindings: ["f19+s"]
   # - commands: ["focus --prev-active-workspace"]
-  #   bindings: ["ralt+a"]
+  #   bindings: ["f19+a"]
 
   # Focus the workspace that last had focus.
   # - commands: ["focus --recent-workspace"]
-  #   bindings: ["ralt+d"]
+  #   bindings: ["f19+d"]
 
   # Change focus to a workspace defined in `workspaces` config.
   - commands: ["focus --workspace 1"]
-    bindings: ["ralt+1"]
+    bindings: ["f19+1", "ctrl+f1"]
   - commands: ["focus --workspace 2"]
-    bindings: ["ralt+2"]
+    bindings: ["f19+2", "ctrl+f2"]
   - commands: ["focus --workspace 3"]
-    bindings: ["ralt+3"]
+    bindings: ["f19+3", "ctrl+f3"]
   - commands: ["focus --workspace 4"]
-    bindings: ["ralt+4"]
+    bindings: ["f19+4", "ctrl+f4"]
   - commands: ["focus --workspace 5"]
-    bindings: ["ralt+5"]
+    bindings: ["f19+5", "ctrl+f5"]
   - commands: ["focus --workspace 6"]
-    bindings: ["ralt+6"]
+    bindings: ["f19+6", "ctrl+f6"]
   - commands: ["focus --workspace 7"]
-    bindings: ["ralt+7"]
+    bindings: ["f19+7", "ctrl+f7"]
   - commands: ["focus --workspace 8"]
-    bindings: ["ralt+8"]
+    bindings: ["f19+8", "ctrl+f8"]
   - commands: ["focus --workspace 9"]
-    bindings: ["ralt+9"]
+    bindings: ["f19+9", "ctrl+f9"]
 
   # Move the focused window's parent workspace to a monitor in a given
   # direction.
-  - commands: ["move-workspace --direction left"]
-    bindings: ["ralt+shift+a"]
-  - commands: ["move-workspace --direction right"]
-    bindings: ["ralt+shift+f"]
-  - commands: ["move-workspace --direction up"]
-    bindings: ["ralt+shift+d"]
-  - commands: ["move-workspace --direction down"]
-    bindings: ["ralt+shift+s"]
+  # - commands: ["move-workspace --direction left"]
+  #   bindings: ["f19+shift+a"]
+  # - commands: ["move-workspace --direction right"]
+  #   bindings: ["f19+shift+f"]
+  # - commands: ["move-workspace --direction up"]
+  #   bindings: ["f19+shift+d"]
+  # - commands: ["move-workspace --direction down"]
+  #   bindings: ["f19+shift+s"]
 
   # Move focused window to a workspace defined in `workspaces` config.
   - commands: ["move --workspace 1"]
-    bindings: ["ralt+shift+1"]
+    bindings: ["f19+shift+1", "ctrl+shift+f1"]
   - commands: ["move --workspace 2"]
-    bindings: ["ralt+shift+2"]
+    bindings: ["f19+shift+2", "ctrl+shift+f2"]
   - commands: ["move --workspace 3"]
-    bindings: ["ralt+shift+3"]
+    bindings: ["f19+shift+3", "ctrl+shift+f3"]
   - commands: ["move --workspace 4"]
-    bindings: ["ralt+shift+4"]
+    bindings: ["f19+shift+4", "ctrl+shift+f4"]
   - commands: ["move --workspace 5"]
-    bindings: ["ralt+shift+5"]
+    bindings: ["f19+shift+5", "ctrl+shift+f5"]
   - commands: ["move --workspace 6"]
-    bindings: ["ralt+shift+6"]
+    bindings: ["f19+shift+6", "ctrl+shift+f6"]
   - commands: ["move --workspace 7"]
-    bindings: ["ralt+shift+7"]
+    bindings: ["f19+shift+7", "ctrl+shift+f7"]
   - commands: ["move --workspace 8"]
-    bindings: ["ralt+shift+8"]
+    bindings: ["f19+shift+8", "ctrl+shift+f8"]
   - commands: ["move --workspace 9"]
-    bindings: ["ralt+shift+9"]
+    bindings: ["f19+shift+9", "ctrl+shift+f9"]
