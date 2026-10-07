@@ -2,7 +2,7 @@
   "$schema": "https://github.com/glzr-io/zebar/raw/v3.1.1/resources/zpack-schema.json",
   "name": "my-bar",
   "version": "1.0.0",
-  "description": "Minimal custom bar. Starts empty; widgets get added over time.",
+  "description": "Omarchy-inspired Macchiato bar with shared system popups.",
   "tags": [
     "bar",
     "minimal"
@@ -17,7 +17,8 @@
       "resizable": false,
       "transparent": true,
       "includeFiles": [
-        "widgets/bar/**"
+        "widgets/bar/**",
+        "widgets/shared/**"
       ],
       "caching": {
         "defaultDuration": 604800,
@@ -26,12 +27,12 @@
       "privileges": {
         "shellCommands": [
           {
-            "program": "shutdown",
-            "argsRegex": ".*"
+            "program": "powershell.exe",
+            "argsRegex": "^-NoProfile -NonInteractive -Command Add-Type -AssemblyName System\\.Windows\\.Forms; \\$p = \\[System\\.Windows\\.Forms\\.SystemInformation\\]::PowerStatus; \\[pscustomobject\\]@\\{ac=\\$p\\.PowerLineStatus\\.ToString\\(\\); charge=\\$p\\.BatteryLifePercent; battery=\\$p\\.BatteryChargeStatus\\.ToString\\(\\)\\} \\| ConvertTo-Json -Compress$"
           },
           {
-            "program": "rundll32.exe",
-            "argsRegex": ".*"
+            "program": "powershell.exe",
+            "argsRegex": "^-NoProfile -NonInteractive -Command \\$ErrorActionPreference = 'Stop'; Add-Type -TypeDefinition 'using System;\nusing System\\.ComponentModel;\nusing System\\.Runtime\\.InteropServices;\nusing System\\.Text;\nusing System\\.Threading;\npublic static class PopupMouse \\{\n  \\[StructLayout\\(LayoutKind\\.Sequential\\)\\] public struct Point \\{ public int X, Y; \\}\n  \\[StructLayout\\(LayoutKind\\.Sequential\\)\\] public struct Mouse \\{ public Point Position; public uint Data, Flags, Time; public UIntPtr Extra; \\}\n  \\[StructLayout\\(LayoutKind\\.Sequential\\)\\] public struct Message \\{ public IntPtr Window; public uint Id; public UIntPtr WParam; public IntPtr LParam; public uint Time; public Point Position; public uint Private; \\}\n  delegate IntPtr Hook\\(int code, IntPtr message, IntPtr data\\);\n  \\[DllImport\\(\"user32\\.dll\", CharSet = CharSet\\.Unicode\\)\\] static extern IntPtr FindWindow\\(string cls, string title\\);\n  \\[DllImport\\(\"user32\\.dll\"\\)\\] static extern IntPtr WindowFromPoint\\(Point point\\);\n  \\[DllImport\\(\"user32\\.dll\"\\)\\] static extern IntPtr GetAncestor\\(IntPtr window, uint flag\\);\n  \\[DllImport\\(\"user32\\.dll\", CharSet = CharSet\\.Unicode\\)\\] static extern int GetWindowText\\(IntPtr window, StringBuilder title, int count\\);\n  \\[DllImport\\(\"kernel32\\.dll\", CharSet = CharSet\\.Unicode\\)\\] static extern IntPtr GetModuleHandle\\(string name\\);\n  \\[DllImport\\(\"user32\\.dll\", SetLastError = true\\)\\] static extern IntPtr SetWindowsHookEx\\(int id, Hook callback, IntPtr module, uint thread\\);\n  \\[DllImport\\(\"user32\\.dll\"\\)\\] static extern bool UnhookWindowsHookEx\\(IntPtr hook\\);\n  \\[DllImport\\(\"user32\\.dll\"\\)\\] static extern IntPtr CallNextHookEx\\(IntPtr hook, int code, IntPtr message, IntPtr data\\);\n  \\[DllImport\\(\"user32\\.dll\"\\)\\] static extern bool PeekMessage\\(out Message message, IntPtr window, uint min, uint max, uint remove\\);\n  \\[DllImport\\(\"user32\\.dll\"\\)\\] static extern bool TranslateMessage\\(ref Message message\\);\n  \\[DllImport\\(\"user32\\.dll\"\\)\\] static extern IntPtr DispatchMessage\\(ref Message message\\);\n  public static void Run\\(\\) \\{\n    var gate = new object\\(\\);\n    string request = null;\n    bool running = true;\n    var input = new Thread\\(delegate\\(\\) \\{\n      try \\{\n        string line;\n        while \\(\\(line = Console\\.ReadLine\\(\\)\\) != null\\) \\{\n          lock \\(gate\\) \\{\n            if \\(line\\.StartsWith\\(\"arm:\"\\)\\) \\{\n              request = line\\.Substring\\(4\\);\n              Console\\.WriteLine\\(\"armed:\" \\+ request\\);\n            \\} else if \\(line == \"disarm:\" \\+ request\\) request = null;\n          \\}\n        \\}\n      \\} finally \\{ lock \\(gate\\) \\{ running = false; \\} \\}\n    \\}\\);\n    input\\.IsBackground = true;\n    Hook callback = delegate\\(int code, IntPtr message, IntPtr data\\) \\{\n      int id = message\\.ToInt32\\(\\);\n      if \\(code >= 0 && \\(id == 0x201 \\|\\| id == 0x204 \\|\\| id == 0x207 \\|\\| id == 0x20B\\)\\) \\{\n        lock \\(gate\\) \\{\n          if \\(request != null\\) \\{\n            var popup = FindWindow\\(null, \"Zebar - my-bar / popup\"\\);\n            if \\(popup != IntPtr\\.Zero\\) \\{\n              var mouse = \\(Mouse\\)Marshal\\.PtrToStructure\\(data, typeof\\(Mouse\\)\\);\n              var target = GetAncestor\\(WindowFromPoint\\(mouse\\.Position\\), 2\\);\n              var title = new StringBuilder\\(256\\);\n              GetWindowText\\(target, title, title\\.Capacity\\);\n              if \\(target != popup && title\\.ToString\\(\\) != \"Zebar - my-bar / bar\"\\) \\{\n                Console\\.WriteLine\\(\"outside:\" \\+ request\\);\n                request = null;\n              \\}\n            \\}\n          \\}\n        \\}\n      \\}\n      return CallNextHookEx\\(IntPtr\\.Zero, code, message, data\\);\n    \\};\n    var hook = SetWindowsHookEx\\(14, callback, GetModuleHandle\\(null\\), 0\\);\n    if \\(hook == IntPtr\\.Zero\\) throw new Win32Exception\\(Marshal\\.GetLastWin32Error\\(\\)\\);\n    try \\{\n      input\\.Start\\(\\);\n      Console\\.WriteLine\\(\"ready\"\\);\n      while \\(true\\) \\{\n        lock \\(gate\\) \\{ if \\(!running\\) break; \\}\n        Message message;\n        while \\(PeekMessage\\(out message, IntPtr\\.Zero, 0, 0, 1\\)\\) \\{\n          TranslateMessage\\(ref message\\);\n          DispatchMessage\\(ref message\\);\n        \\}\n        Thread\\.Sleep\\(10\\);\n      \\}\n    \\} finally \\{\n      UnhookWindowsHookEx\\(hook\\);\n      GC\\.KeepAlive\\(callback\\);\n    \\}\n  \\}\n\\}'; \\[PopupMouse\\]::Run\\(\\)$"
           }
         ]
       },
@@ -53,6 +54,40 @@
           }
         }
       ]
+    },
+    {
+      "name": "popup",
+      "htmlPath": "./widgets/popup/index.html",
+      "zOrder": "top_most",
+      "shownInTaskbar": false,
+      "focused": true,
+      "resizable": false,
+      "transparent": true,
+      "includeFiles": [
+        "widgets/popup/**",
+        "widgets/shared/**"
+      ],
+      "caching": {
+        "defaultDuration": 604800,
+        "rules": []
+      },
+      "privileges": {
+        "shellCommands": [
+          {
+            "program": "shutdown",
+            "argsRegex": "^(/l|/s /t 0)$"
+          },
+          {
+            "program": "rundll32.exe",
+            "argsRegex": "^user32\\.dll,LockWorkStation$"
+          },
+          {
+            "program": "powershell.exe",
+            "argsRegex": "^-NoProfile -NonInteractive -Command \\$ErrorActionPreference = 'Stop'; Add-Type -TypeDefinition 'using System;\nusing System\\.Runtime\\.InteropServices;\n\\[ComImport, Guid\\(\"870af99c-171d-4f9e-af0d-e63df40c2bc9\"\\)\\] class PolicyConfigClient \\{\\}\n\\[ComImport, Guid\\(\"f8679f50-850a-41cf-9c72-430f290290c8\"\\), InterfaceType\\(ComInterfaceType\\.InterfaceIsIUnknown\\)\\]\ninterface IPolicyConfig \\{\n  void GetMixFormat\\(\\); void GetDeviceFormat\\(\\); void ResetDeviceFormat\\(\\); void SetDeviceFormat\\(\\);\n  void GetProcessingPeriod\\(\\); void SetProcessingPeriod\\(\\); void GetShareMode\\(\\); void SetShareMode\\(\\);\n  void GetPropertyValue\\(\\); void SetPropertyValue\\(\\);\n  \\[PreserveSig\\] int SetDefaultEndpoint\\(\\[MarshalAs\\(UnmanagedType\\.LPWStr\\)\\] string id, int role\\);\n\\}\npublic class AudioOutput \\{\n  public static void Select\\(string id\\) \\{\n    var policy = \\(IPolicyConfig\\)new PolicyConfigClient\\(\\);\n    try \\{ for \\(int role = 0; role < 3; role\\+\\+\\) Marshal\\.ThrowExceptionForHR\\(policy\\.SetDefaultEndpoint\\(id, role\\)\\); \\}\n    finally \\{ Marshal\\.ReleaseComObject\\(policy\\); \\}\n  \\}\n\\}'; \\[AudioOutput\\]::Select\\('\\{0\\.0\\.0\\.00000000\\}\\.\\{[0-9a-fA-F-]{36}\\}'\\)$"
+          }
+        ]
+      },
+      "presets": []
     }
   ]
 }
