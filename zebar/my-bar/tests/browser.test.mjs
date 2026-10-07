@@ -77,6 +77,23 @@ const mocks = `
       notify();
       return { code: 0 };
     }
+    if (program === 'powershell.exe' && args[3]?.includes('class BluetoothMenu')) {
+      calls.push(['bluetooth', program, args]);
+      if (window.__test.holdBluetoothScan && args[3].includes('::Read($true)')) {
+        return await new Promise(resolve => { window.__test.resolveBluetoothScan = snapshot => resolve({ code: 0, stdout: JSON.stringify(snapshot) }); });
+      }
+      if (window.__test.holdBluetoothStatus && args[3].includes('::Read($false)')) {
+        return await new Promise(resolve => { window.__test.resolveBluetoothStatus = snapshot => resolve({ code: 0, stdout: JSON.stringify(snapshot) }); });
+      }
+      if (window.__test.failBluetooth) return { code: 1, stderr: 'Bluetooth access denied' };
+      return { code: 0, stdout: JSON.stringify(window.__test.bluetooth ?? {
+        available: true, enabled: true, devices: [
+          { id: 'connected', name: 'Headset', paired: true, connected: true },
+          { id: 'paired', name: 'Keyboard', paired: true, connected: false },
+          { id: 'available', name: 'Mouse', paired: false, connected: false },
+        ],
+      }) };
+    }
     if (program === 'powershell.exe') return {
       code: 0, stdout: JSON.stringify(window.__test.powerStatus ?? { ac: 'Online', charge: 0.8, battery: 'High' }),
     };
@@ -167,6 +184,9 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
         source = source.replace('const powerTimer = setInterval(refreshPower, 10000);',
           'window.__refreshPower = refreshPower; const powerTimer = setInterval(refreshPower, 10000);');
       }
+      if (url.pathname === '/widgets/popup/bluetooth.mjs') {
+        source = source.replace('const statusTimer = setInterval', 'window.__refreshBluetoothStatus = () => run("status"); const statusTimer = setInterval');
+      }
       source = source.replaceAll('https://esm.sh/zebar@3.3.1', '/__mocks.mjs')
         .replaceAll('https://esm.sh/@tauri-apps/api@2.0.2/window', '/__mocks.mjs');
       response.setHeader('Content-Type', url.pathname.endsWith('.html') ? 'text/html' : 'text/javascript');
@@ -234,7 +254,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert(Math.abs(result.center - result.viewport / 2) < 0.5);
       assert.match(result.clock, /10:58/);
       assert(result.clock.length > 5, 'Omarchy weekday belongs in clock');
-      assert.deepEqual(result.triggers, ['calendar', 'network', 'audio', 'display', 'power']);
+      assert.deepEqual(result.triggers, ['calendar', 'bluetooth', 'network', 'audio', 'display', 'power']);
       assert.deepEqual(result.workspaces, ['One', '2']);
       assert.equal(result.modes, 'pauseresize');
       assert.equal(result.bg, 'rgb(36, 39, 58)');
@@ -311,7 +331,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       }
     });
     await t.test('popup height follows rendered content rather than filling the viewport', async () => {
-      for (const type of ['calendar', 'audio', 'network', 'display', 'power']) {
+      for (const type of ['calendar', 'audio', 'network', 'bluetooth', 'display', 'power']) {
         await load(type);
         const result = await evaluate(`({
           height: window.__popupHeights.at(-1),
@@ -334,6 +354,76 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       await click('Refresh displays');
       await pause(100);
       assert(await evaluate('window.__popupHeights.at(-1) < innerHeight'), 'A single display should not fill the maximum height.');
+    });
+    await t.test('Bluetooth groups devices, pairs via native calls and reports failures', async () => {
+      await load('bluetooth');
+      await pause(100);
+      assert.deepEqual(await evaluate("[...document.querySelectorAll('.bluetooth-section h2')].map(el => el.textContent)"), ['Connected', 'Paired', 'Available']);
+      assert.equal(await evaluate("document.querySelector('.audio-switch').getAttribute('aria-checked')"), 'true');
+      await evaluate("document.querySelector('[data-action=pair]').click()");
+      await pause(100);
+      assert(await evaluate("window.__test.calls.some(call => call[0] === 'bluetooth' && call[2][3].includes(\"::Act('pair'\"))"));
+      await evaluate("window.__test.failBluetooth = true; document.querySelector('.bluetooth-scan').click()");
+      await pause(100);
+      assert(await evaluate("document.querySelector('#bluetooth-status').textContent.includes('Bluetooth access denied')"));
+      assert.equal(await evaluate("document.querySelector('#bluetooth-status').getAttribute('role')"), 'alert');
+      assert.equal(await evaluate("document.querySelector('#popup-error').hidden"), true, 'Device errors should not appear twice.');
+      await evaluate("document.querySelector('#bluetooth-settings').click()");
+      await pause(50);
+      assert.deepEqual(await evaluate('window.__test.calls.at(-1)'), ['shell', 'explorer.exe', ['ms-settings:bluetooth']]);
+    });
+    await t.test('Bluetooth scans leave paired controls mounted and usable; late scans cannot undo an action', async () => {
+      await load('bluetooth');
+      await pause(100);
+      await evaluate(`(() => {
+        window.__pairedBefore = document.querySelector('[data-device-id="paired"][data-action="connect"]');
+        window.__test.holdBluetoothScan = true;
+        document.querySelector('.bluetooth-scan').click();
+      })()`);
+      await pause(50);
+      assert.equal(await evaluate('window.__pairedBefore.disabled'), false);
+      assert.equal(await evaluate('window.__pairedBefore.isConnected'), true);
+      assert.equal(await evaluate("document.querySelector('.audio-switch').disabled"), false);
+      assert.equal(await evaluate("document.querySelector('#system-content').getAttribute('aria-busy')"), 'false');
+      await evaluate(`(() => {
+        window.__test.bluetooth = { available: true, enabled: true, devices: [
+          { id: 'paired', name: 'Keyboard', paired: true, connected: true },
+        ] };
+        window.__pairedBefore.click();
+      })()`);
+      await pause(100);
+      assert(await evaluate("window.__test.calls.some(call => call[0] === 'bluetooth' && call[2][3].includes(\"::Act('connect'\"))"));
+      await evaluate(`window.__test.resolveBluetoothScan({ available: true, enabled: true, devices: [
+        { id: 'paired', name: 'Keyboard', paired: true, connected: false },
+        { id: 'stale', name: 'Stale scan result', paired: false, connected: false },
+      ] })`);
+      await pause(100);
+      assert.equal(await evaluate('window.__pairedBefore.isConnected'), true);
+      assert.equal(await evaluate('window.__pairedBefore.dataset.action'), 'disconnect');
+      assert.equal(await evaluate("document.querySelector('[data-device-id=stale]') === null"), true);
+      assert.equal(await evaluate('window.__pairedBefore.disabled'), false);
+    });
+    await t.test('Bluetooth status refresh updates paired rows without disabling them or replacing nearby devices', async () => {
+      await load('bluetooth');
+      await pause(100);
+      await evaluate(`(() => {
+        window.__pairedBefore = document.querySelector('[data-device-id="paired"][data-action="connect"]');
+        window.__test.holdBluetoothStatus = true;
+        void window.__refreshBluetoothStatus();
+      })()`);
+      await pause(50);
+      assert.equal(await evaluate('window.__pairedBefore.disabled'), false);
+      assert.equal(await evaluate("document.querySelector('#system-content').getAttribute('aria-busy')"), 'false');
+      await evaluate(`window.__test.resolveBluetoothStatus({ available: true, enabled: true, devices: [
+        { id: 'connected', name: 'Headset', paired: true, connected: true },
+        { id: 'paired', name: 'Keyboard', paired: true, connected: true },
+      ] })`);
+      await pause(100);
+      assert.equal(await evaluate('window.__pairedBefore.isConnected'), true);
+      assert.equal(await evaluate('window.__pairedBefore.dataset.action'), 'disconnect');
+      assert.equal(await evaluate("document.querySelector('[data-device-id=available]').disabled"), false);
+      assert.equal(await evaluate("document.querySelector('[data-device-id=available] .bluetooth-name').textContent"), 'Mouse');
+      await evaluate('window.__test.holdBluetoothStatus = false');
     });
     await t.test('calendar still fits and supports keyboard month navigation', async () => {
       await load('calendar');

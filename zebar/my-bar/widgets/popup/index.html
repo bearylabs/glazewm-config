@@ -266,6 +266,29 @@
       [data-muted='true'] .audio-control__row output,
       [data-muted='true'] #volume-slider { opacity: 0.5; }
       .panel .audio-status { margin: 6px 0 0; }
+      html[data-popup-type='bluetooth'] body {
+        border-width: 2px; border-radius: 0;
+        font: 12px "JetBrainsMono Nerd Font", "JetBrains Mono", Consolas, monospace;
+        --audio-selected: color-mix(in srgb, var(--text) 18%, transparent);
+        --audio-hover: color-mix(in srgb, var(--text) 8%, transparent);
+        --audio-outline: color-mix(in srgb, var(--text) 25%, transparent);
+        --panel-caption: color-mix(in srgb, var(--text) 71.4%, black);
+        --audio-caption: var(--panel-caption);
+      }
+      html[data-popup-type='bluetooth'][data-popup-ready='true'] body { border-color: var(--accent); }
+      html[data-popup-type='bluetooth'] .panel { max-height: calc(var(--popup-max-height, 100vh) - 6px); padding: 14px; }
+      .bluetooth-hero.hero { min-height: 34px; gap: 14px; padding: 0; margin-bottom: 14px; }
+      .bluetooth-hero .hero__icon { flex-basis: 24px; width: 24px; height: 24px; border-radius: 0; background: transparent; color: var(--text); }
+      .bluetooth-hero .hero__title { font-size: 14px; font-weight: 700; }
+      .bluetooth-hero .hero__meta { color: var(--panel-caption); font-size: 10px; letter-spacing: 1.2px; }
+      .bluetooth-section { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--audio-selected); }
+      .panel .bluetooth-section h2 { margin: 0 0 10px; color: var(--panel-caption); }
+      .bluetooth-row { display: flex; gap: 6px; margin-bottom: 6px; }
+      .bluetooth-row .audio-device { flex: 1; min-width: 0; }
+      .bluetooth-name, .bluetooth-state { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .bluetooth-state { color: var(--panel-caption); font-size: 10px; margin-top: 3px; font-weight: 400; }
+      .panel :is(.bluetooth-scan, .bluetooth-forget, .bluetooth-settings) { border: 1px solid var(--audio-outline); border-radius: 0; background: transparent; }
+      .panel :is(.bluetooth-scan, .bluetooth-forget, .bluetooth-settings):hover { background: var(--audio-hover); }
       @media (prefers-reduced-motion: reduce) {
         .audio-switch__knob, .audio-slider-row input::-webkit-slider-thumb { transition: none; }
         .battery-progress[data-charging='true'] > span { animation: none; }

@@ -4,6 +4,7 @@ import test from 'node:test';
 import vm from 'node:vm';
 import { powerStatusArgs } from '../widgets/shared/battery-model.mjs';
 import { outputDeviceArgsRegex } from '../widgets/shared/audio-model.mjs';
+import { bluetoothArgsRegex, bluetoothSettingsPermission } from '../widgets/shared/bluetooth-model.mjs';
 import { calendarDays, dateKey, popupPlacement, popupSizes, shiftMonth } from '../widgets/shared/popup-model.mjs';
 import { attachPopupSizing } from '../widgets/shared/popup-sizing.mjs';
 import { outsideClickArgs, outsideClickArgsRegex, createOutsideClickWatcher, spawnOutsideClickProcess } from '../widgets/shared/popup-dismissal.mjs';
@@ -37,7 +38,11 @@ test('popup owns narrowly scoped power privileges without changing bar docking',
   assert.deepEqual(popup.privileges.shellCommands[2], {
     program: 'powershell.exe', argsRegex: outputDeviceArgsRegex(),
   });
-  assert.equal(popup.privileges.shellCommands.length, 3);
+  assert.deepEqual(popup.privileges.shellCommands[3], {
+    program: 'powershell.exe', argsRegex: bluetoothArgsRegex(),
+  });
+  assert.deepEqual(popup.privileges.shellCommands[4], bluetoothSettingsPermission);
+  assert.equal(popup.privileges.shellCommands.length, 5);
   assert.equal(bar.presets[0].height, '28px');
   assert.equal(bar.presets[0].dockToEdge.enabled, true);
   assert.deepEqual(bar.presets[0].monitorSelection, { type: 'all' });
@@ -333,7 +338,7 @@ test('switching popup types preserves one window, dimensions, and trigger-specif
       assert.equal(bar.expanded(other), String(other === type));
     }
   }
-  assert.equal(env.startCount, 5);
+  assert.equal(env.startCount, Object.keys(popupSizes).length);
   assert.deepEqual(env.errors, []);
 });
 

@@ -71,6 +71,7 @@ export const popupSizes = Object.freeze({
   calendar: { width: 328, height: 376 },
   audio: { width: 380, height: 480 },
   network: { width: 380, height: 540 },
+  bluetooth: { width: 380, height: 580 },
   display: { width: 380, height: 560 },
   power: { width: 380, height: 620 },
 });

@@ -173,6 +173,8 @@
       </button>
     </div>
     <div class="zone zone--right">
+      <button class="status" id="bluetooth-trigger" type="button" title="Bluetooth"
+              aria-label="Open Bluetooth devices" aria-haspopup="dialog" aria-expanded="false" data-popup-trigger="bluetooth"></button>
       <button class="status status--network" id="network-trigger" type="button" title="Network"
               aria-label="Open network information" aria-haspopup="dialog" aria-expanded="false"
               data-popup-trigger="network" data-link="none">
@@ -201,6 +203,7 @@
       for (const [id, icons] of Object.entries({
         split: [['split-horizontal', 'split__horizontal'], ['split-vertical', 'split__vertical']],
         'network-trigger': [['wifi', 'net__wifi'], ['ethernet', 'net__ethernet'], ['wifi-off', 'net__none']],
+        'bluetooth-trigger': [['bluetooth', '']],
         'audio-trigger': [['volume-high', 'vol__on'], ['volume-off', 'vol__muted']],
         'display-trigger': [['monitor', '']],
       })) {

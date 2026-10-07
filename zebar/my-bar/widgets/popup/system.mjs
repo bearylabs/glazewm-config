@@ -5,6 +5,8 @@ import { outputVolumeName, selectOutputDevice } from '../shared/audio-model.mjs'
 import { createBatteryIcon, createIcon } from '../shared/icons.mjs';
 import { diskUsage, executePowerAction, gib, percent, powerCommands } from '../shared/system-model.mjs';
 
+import { renderBluetooth } from './bluetooth.mjs';
+
 function element(tag, text, className) {
   const node = document.createElement(tag);
   if (text !== undefined) node.textContent = text;
@@ -497,14 +499,14 @@ function renderPower(root, reportError) {
 
 export function renderSystemPopup(type, reportError) {
   const root = document.getElementById('system-content');
-  const renderers = { audio: renderAudio, network: renderNetwork, display: renderDisplay, power: renderPower };
+  const renderers = { audio: renderAudio, network: renderNetwork, bluetooth: renderBluetooth, display: renderDisplay, power: renderPower };
   if (!Object.hasOwn(renderers, type)) throw new Error(`Unknown system popup: ${type}`);
   document.documentElement.dataset.popupType = type;
-  const omarchyPanel = ['audio', 'network', 'display', 'power'].includes(type);
+  const omarchyPanel = ['audio', 'network', 'bluetooth', 'display', 'power'].includes(type);
   document.querySelector('header').hidden = omarchyPanel;
   document.querySelector('main').setAttribute('aria-labelledby', omarchyPanel ? `${type}-title` : 'month-label');
   document.getElementById('month-label').textContent = {
-    audio: 'Audio', network: 'Network', display: 'Displays', power: 'Power & system',
+    audio: 'Audio', network: 'Network', bluetooth: 'Bluetooth', display: 'Displays', power: 'Power & system',
   }[type];
   return renderers[type](root, reportError);
 }
