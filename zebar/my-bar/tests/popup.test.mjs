@@ -416,7 +416,7 @@ test('trigger hover clears on activation and focus loss without a pointerleave',
   assert.deepEqual(env.errors, []);
 });
 
-async function popupHarness(initiallyFocused = false, type = 'calendar') {
+async function popupHarness(initiallyFocused = false, type = 'calendar', layoutOverrides = {}) {
   const request = {
     requestId: 'request-1', ownerId: 'bar-1', packId: 'my-bar',
     type, phase: 'opening',
@@ -426,6 +426,7 @@ async function popupHarness(initiallyFocused = false, type = 'calendar') {
       barPosition: { x: -2560, y: -200 },
       rect: { left: 400, width: 40, bottom: 28 },
       width: 328, maxHeight: 376,
+      ...layoutOverrides,
     },
   };
   let state = JSON.stringify(request);
@@ -455,7 +456,12 @@ async function popupHarness(initiallyFocused = false, type = 'calendar') {
     isFocused: async () => focused,
     setFocus: async () => { throw new Error('window.set_focus not allowed by ACL'); },
     setSize: async size => { sizes.push(size); lifecycle.push('size'); },
-    setPosition: async position => { positions.push(position); lifecycle.push('position'); },
+    setPosition: async position => {
+      assert(Number.isInteger(position.x), 'Tauri physical x must be an i32.');
+      assert(Number.isInteger(position.y), 'Tauri physical y must be an i32.');
+      positions.push(position);
+      lifecycle.push('position');
+    },
     close: async () => {
       assert.equal(state, null, 'Expanded state must be cleared before destroying the popup WebView.');
       closed = true;
@@ -591,6 +597,19 @@ test('initially unfocused popup ignores startup blur and closes only after real 
   await popup.focus(false);
   assert.equal(popup.closed, true, 'Actual focus loss after activation must still dismiss.');
   assert.deepEqual(popup.errors, []);
+});
+
+test('native positioning rounds fractional physical coordinates at mixed DPI', async () => {
+  for (const scale of [1.25, 1.5, 1.75]) {
+    const display = monitor(-2560, -200, 2560, 1440, scale);
+    const rect = { left: 400.5, width: 40, bottom: 28.5 };
+    const popup = await popupHarness(false, 'calendar', {
+      monitor: display, monitors: [display], rect,
+    });
+    assert.equal(popup.positions[0].x, Math.round(-2560 + (420.5 - 164) * scale));
+    assert.equal(popup.positions[0].y, Math.round(-200 + 34.5 * scale));
+    assert.deepEqual(popup.errors, []);
+  }
 });
 
 test('popup stays transparent until native sizing and the resized frame are ready', async () => {

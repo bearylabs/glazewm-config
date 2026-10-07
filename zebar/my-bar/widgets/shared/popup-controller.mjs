@@ -326,9 +326,11 @@ export async function initialisePopup(render, reportError) {
           layout.barPosition, layout.rect, { width: layout.width, height });
         await widget.tauriWindow.setSize(new LogicalSize(layout.width, parseFloat(placement.height)));
         if (closing) return;
+        // PhysicalPosition is serialized as i32 by Tauri; mixed DPI and
+        // fractional DOM bounds can produce subpixel physical coordinates.
         await widget.tauriWindow.setPosition(new PhysicalPosition(
-          layout.monitor.position.x + parseFloat(placement.offsetX) * layout.monitor.scaleFactor,
-          layout.monitor.position.y + parseFloat(placement.offsetY) * layout.monitor.scaleFactor,
+          Math.round(layout.monitor.position.x + parseFloat(placement.offsetX) * layout.monitor.scaleFactor),
+          Math.round(layout.monitor.position.y + parseFloat(placement.offsetY) * layout.monitor.scaleFactor),
         ));
       },
     });
