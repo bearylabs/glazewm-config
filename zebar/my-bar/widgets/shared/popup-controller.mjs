@@ -181,7 +181,11 @@ export function attachPopupTriggers(triggers, reportError, clearError) {
     Promise.resolve().then(action).catch(reportError);
   }
   function toggle(trigger, type, closeRequestId) {
-    const rect = trigger.getBoundingClientRect();
+    const triggerRect = trigger.getBoundingClientRect();
+    // Buttons can be shorter than the bar (especially the centered clock).
+    // Anchor vertically to the bar viewport, not the button's lower edge.
+    const rect = { left: triggerRect.left, width: triggerRect.width,
+      bottom: document.documentElement.clientHeight };
     run(() => togglePopup(type, rect, closeRequestId));
   }
   function update() {

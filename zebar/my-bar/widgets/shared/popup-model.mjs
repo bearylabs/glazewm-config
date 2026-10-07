@@ -3,22 +3,21 @@ export function popupPlacement(monitor, monitors, barPosition, rect, size) {
   if (!Number.isFinite(scale) || scale <= 0) {
     throw new Error('Invalid monitor scale factor.');
   }
-  const margin = 6 * scale;
-  const width = Math.min(size.width * scale, monitor.size.width - margin * 2);
-  const height = Math.min(size.height * scale, monitor.size.height - margin * 2);
+  const width = Math.min(size.width * scale, monitor.size.width);
+  const height = Math.min(size.height * scale, monitor.size.height);
   if (width <= 0 || height <= 0) {
     throw new Error('Monitor is too small for the popup.');
   }
   const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
   const x = clamp(
     barPosition.x + (rect.left + rect.width / 2) * scale - width / 2,
-    monitor.position.x + margin,
-    monitor.position.x + monitor.size.width - width - margin,
+    monitor.position.x,
+    monitor.position.x + monitor.size.width - width,
   );
   const y = clamp(
-    barPosition.y + rect.bottom * scale + margin,
-    monitor.position.y + margin,
-    monitor.position.y + monitor.size.height - height - margin,
+    barPosition.y + rect.bottom * scale,
+    monitor.position.y,
+    monitor.position.y + monitor.size.height - height,
   );
   const names = monitors.filter(item => item.name === monitor.name);
   const sorted = [...monitors].sort(

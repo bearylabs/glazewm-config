@@ -78,7 +78,7 @@ test('placement preserves physical anchor at mixed DPI and negative coordinates'
     const x = display.position.x + parseFloat(placement.offsetX) * scale;
     const y = display.position.y + parseFloat(placement.offsetY) * scale;
     assert.equal(x + 164 * scale, display.position.x + 420 * scale);
-    assert.equal(y, display.position.y + 34 * scale);
+    assert.equal(y, display.position.y + 28 * scale);
     assert.equal(placement.dockToEdge.enabled, false);
     assert.deepEqual(placement.monitorSelection, { type: 'name', match: 'display' });
   }
@@ -89,10 +89,22 @@ test('placement clamps all edges and shrinks on small monitors', () => {
   for (const left of [-100, 10, 500]) {
     const placement = popupPlacement(display, [display], { x: 0, y: 220 },
       { left, width: 20, bottom: 28 }, { width: 328, height: 376 });
-    assert.equal(parseFloat(placement.width), 288);
-    assert.equal(parseFloat(placement.height), 238);
-    assert.equal(parseFloat(placement.offsetX), 6);
-    assert.equal(parseFloat(placement.offsetY), 6);
+    assert.equal(parseFloat(placement.width), 300);
+    assert.equal(parseFloat(placement.height), 250);
+    assert.equal(parseFloat(placement.offsetX), 0);
+    assert.equal(parseFloat(placement.offsetY), 0);
+  }
+});
+
+test('rightmost popups meet the screen edge and bar without gaps at mixed DPI', () => {
+  for (const scale of [1, 1.25, 1.5, 2]) {
+    const display = monitor(-1920, -200, 1920, 1440, scale);
+    const placement = popupPlacement(display, [display], display.position,
+      { left: 1920 / scale - 40, width: 40, bottom: 28 }, popupSizes.network);
+    const right = display.position.x + (parseFloat(placement.offsetX) + parseFloat(placement.width)) * scale;
+    const top = display.position.y + parseFloat(placement.offsetY) * scale;
+    assert.equal(right, display.position.x + display.size.width);
+    assert.equal(top, display.position.y + 28 * scale);
   }
 });
 
@@ -104,6 +116,18 @@ test('unnamed or duplicate monitors use backend-sorted zero-based indices', () =
   assert.deepEqual(placement.monitorSelection, { type: 'index', match: 1 });
   assert.throws(() => popupPlacement(primary, [left], primary.position,
     { left: 0, width: 20, bottom: 28 }, { width: 328, height: 376 }), /no longer connected/);
+});
+
+test('short clock and status buttons anchor popups below the full bar height', async () => {
+  const env = await harness({ triggerBottom: 24, barHeight: 28 });
+  const bar = await env.bar('bar-1');
+  for (const type of ['calendar', 'network']) {
+    bar.click(type);
+    await env.settle();
+    assert.equal(parseFloat(env.placements.at(-1).offsetY), 28);
+    assert.equal(env.state().layout.rect.bottom, 28, 'Resizing must preserve the full bar anchor.');
+  }
+  assert.deepEqual(env.errors, []);
 });
 
 test('calendar has six Monday-first weeks including leap day and year transitions', () => {
@@ -141,7 +165,7 @@ async function loadController(context, mocks) {
   return module.namespace;
 }
 
-async function harness({ startError = null, locksAvailable = true } = {}) {
+async function harness({ startError = null, locksAvailable = true, triggerBottom = 28, barHeight = 28 } = {}) {
   const values = new Map();
   const listeners = new Map();
   let nativeWindows = [];
@@ -165,6 +189,7 @@ async function harness({ startError = null, locksAvailable = true } = {}) {
   async function bar(id) {
     const window = new EventTarget();
     const document = new EventTarget();
+    document.documentElement = { clientHeight: barHeight };
     let mouseOutput;
     let helperStopped = false;
     let helperPid;
@@ -248,7 +273,7 @@ async function harness({ startError = null, locksAvailable = true } = {}) {
     const controller = await loadController(context, mocks);
     const triggers = Object.keys(popupSizes).map(type => {
       const trigger = new EventTarget();
-      trigger.getBoundingClientRect = () => ({ left: 940, width: 40, bottom: 28 });
+      trigger.getBoundingClientRect = () => ({ left: 940, width: 40, bottom: triggerBottom });
       trigger.attributes = {};
       const classes = new Set();
       trigger.classList = {
@@ -588,7 +613,7 @@ test('initially unfocused popup ignores startup blur and closes only after real 
   assert.equal(popup.sizes[0].width, 328);
   assert.equal(popup.sizes[0].height, 304, 'Native height follows the measured content plus border/padding.');
   assert.equal(popup.positions[0].x, -2176);
-  assert.equal(popup.positions[0].y, -149, 'Resizing preserves the bar anchor at mixed DPI.');
+  assert.equal(popup.positions[0].y, -158, 'Resizing preserves the bar anchor at mixed DPI.');
   await popup.focus(false);
   assert.equal(popup.closed, false, 'Startup blur before activation must not dismiss the popup.');
   await popup.focus(true);
@@ -607,7 +632,7 @@ test('native positioning rounds fractional physical coordinates at mixed DPI', a
       monitor: display, monitors: [display], rect,
     });
     assert.equal(popup.positions[0].x, Math.round(-2560 + (420.5 - 164) * scale));
-    assert.equal(popup.positions[0].y, Math.round(-200 + 34.5 * scale));
+    assert.equal(popup.positions[0].y, Math.round(-200 + 28.5 * scale));
     assert.deepEqual(popup.errors, []);
   }
 });
