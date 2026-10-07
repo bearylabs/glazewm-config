@@ -5,12 +5,15 @@ import { LogicalSize, PhysicalPosition } from 'https://esm.sh/@tauri-apps/api@2.
 import { invoke } from 'https://esm.sh/@tauri-apps/api@2.0.2/core';
 import { popupPlacement, popupSizes } from './popup-model.mjs';
 import { attachPopupSizing } from './popup-sizing.mjs';
+import { waitForPopupSessionEnd } from './popup-session.mjs';
 import { createOutsideClickWatcher, spawnOutsideClickProcess } from './popup-dismissal.mjs';
 
 const widget = zebar.currentWidget();
 const stateKey = `my-bar:popup:${widget.packId}`;
 const lockName = `${stateKey}:lifecycle`;
 const readyEvent = 'my-bar:popup-ready';
+const openEvent = 'my-bar:popup-open';
+const windowKey = `${stateKey}:window`;
 const popupTitle = `Zebar - ${widget.packId} / popup`;
 const barTitle = `Zebar - ${widget.packId} / bar`;
 const startupTimeout = 10000;
@@ -59,6 +62,62 @@ async function closeWindows(windows) {
   }
 }
 
+async function waitForPopupReady(request, start) {
+  let resolveReady;
+  const ready = new Promise(resolve => { resolveReady = resolve; });
+  const unlisten = await listen(readyEvent, ({ payload }) => {
+    if (payload.packId === widget.packId && payload.requestId === request.requestId) resolveReady(payload);
+  });
+  let timer;
+  try {
+    const result = await Promise.race([
+      Promise.resolve().then(start).then(() => ready),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${request.type ?? 'Popup prewarm'} startup timed out.`)), startupTimeout);
+      }),
+    ]);
+    if (result.error) throw new Error(result.error);
+    return result;
+  } finally {
+    clearTimeout(timer);
+    await unlisten();
+  }
+}
+
+export async function prewarmPopup() {
+  return exclusive(async () => {
+    // All monitor bars share this lock and cache. Never replace a live popup.
+    const previous = readState();
+    const windows = await popupWindows();
+    const cachedId = localStorage.getItem(windowKey);
+    if (windows.some(nativeWindow => nativeWindow.label === cachedId) || (previous && windows.length)) return;
+    // Storage survives process restarts; a request without a native window is stale.
+    if (previous) writeState(null);
+    await closeWindows(windows);
+    const [monitor, monitors] = await Promise.all([currentMonitor(), availableMonitors()]);
+    if (!monitor || !monitors.length) throw new Error('Cannot determine the popup prewarm monitor.');
+    const placement = popupPlacement(monitor, monitors, monitor.position,
+      { left: 0, width: 1, bottom: 0 }, { width: 1, height: 1 });
+    // Start a transparent, nonfocused 1px surface outside the entire virtual
+    // desktop, not merely outside one screen (mixed DPI/negative coordinates).
+    placement.offsetX = `${(Math.max(...monitors.map(item => item.position.x + item.size.width)) - monitor.position.x + 64) / monitor.scaleFactor}px`;
+    placement.offsetY = `${(Math.max(...monitors.map(item => item.position.y + item.size.height)) - monitor.position.y + 64) / monitor.scaleFactor}px`;
+    const request = { requestId: crypto.randomUUID(), packId: widget.packId, phase: 'warming' };
+    try {
+      await waitForPopupReady(request, async () => {
+        writeState(request);
+        await zebar.startWidget('popup', placement);
+      });
+      writeState(null);
+    } catch (error) {
+      writeState(null);
+      localStorage.removeItem(windowKey);
+      await closeWindows(await popupWindows());
+      throw error;
+    }
+  });
+}
+
 // Native client/MFA interactions temporarily retain this exact popup request.
 // The deadline bounds retention even if the WebView or operation fails.
 export function retainPopupDuringInteraction(duration = 150000) {
@@ -81,15 +140,10 @@ export async function dismissPopup(requestId, automatic = false) {
     if (requestId && state?.requestId !== requestId) return;
     if (automatic && state?.type === 'network' && state.retainDismissalUntil > Date.now()) return false;
     const windows = await popupWindows();
-    // Publish the closed state before closing our own WebView: code after the
-    // native close may never run, leaving the bar's expanded state stuck.
+    // Unlike destroying our own WebView, hiding it allows code to continue.
+    // Publish only after success so a failed hide preserves the live session.
+    await Promise.all(windows.map(nativeWindow => nativeWindow.hide()));
     writeState(null);
-    try {
-      await closeWindows(windows);
-    } catch (error) {
-      writeState(state);
-      throw error;
-    }
   });
 }
 
@@ -101,9 +155,13 @@ async function togglePopup(type, rect, closeRequestId = null) {
     const windows = await popupWindows();
     const isToggle = closeRequestId || (windows.length && previous?.ownerId === widget.id &&
       previous?.type === type);
-    await closeWindows(windows);
+    await Promise.all(windows.map(nativeWindow => nativeWindow.hide()));
     writeState(null);
     if (isToggle) return;
+    const cachedId = localStorage.getItem(windowKey);
+    const reusable = windows.find(nativeWindow => nativeWindow.label === cachedId);
+    // Old/orphaned windows have no live request listener and cannot be reused.
+    await closeWindows(windows.filter(nativeWindow => nativeWindow !== reusable));
 
     const [monitor, monitors, position] = await Promise.all([
       currentMonitor(),
@@ -125,36 +183,24 @@ async function togglePopup(type, rect, closeRequestId = null) {
         maxHeight: parseFloat(placement.height),
       },
     };
-    let resolveReady;
-    const ready = new Promise(resolve => { resolveReady = resolve; });
-    const unlisten = await listen(readyEvent, ({ payload }) => {
-      if (payload.packId === widget.packId && payload.requestId === request.requestId) {
-        resolveReady(payload);
-      }
-    });
-    let timer;
     try {
-      // Usually already warm from bar startup; arm before creating the window
-      // so its very first outside click is covered without delaying its render.
-      await mouseWatcher.arm(request.requestId);
-      writeState(request);
-      await zebar.startWidget('popup', placement);
-      const result = await Promise.race([
-        ready,
-        new Promise((_, reject) => {
-          timer = setTimeout(() => reject(new Error(`${type} startup timed out.`)), startupTimeout);
-        }),
-      ]);
-      if (result.error) throw new Error(result.error);
+      const result = await waitForPopupReady(request, async () => {
+        // Arm only real openings, never the hidden startup window.
+        await mouseWatcher.arm(request.requestId);
+        writeState(request);
+        if (reusable) {
+          await emit(openEvent, { ...request, popupId: reusable.label });
+        } else {
+          await zebar.startWidget('popup', placement);
+        }
+      });
       writeState({ ...request, phase: 'open', popupId: result.popupId });
     } catch (error) {
       // A failed HTML/module start must not leave an unowned native window.
-      await closeWindows(await popupWindows());
       writeState(null);
+      localStorage.removeItem(windowKey);
+      await closeWindows(await popupWindows());
       throw error;
-    } finally {
-      clearTimeout(timer);
-      await unlisten();
     }
   });
 }
@@ -173,6 +219,10 @@ export function attachPopupTriggers(triggers, reportError, clearError) {
       }, reportError,
     );
     void mouseWatcher.prewarm().catch(reportError);
+    if (navigator.locks) {
+      // Startup is best-effort: a real click retries if background loading fails.
+      void prewarmPopup().catch(error => console.warn('Popup prewarm failed; retrying on click:', error));
+    }
     window.addEventListener('pagehide', () => mouseWatcher.stop(), { once: true });
   }
   let pointerCloseRequestId = null;
@@ -264,25 +314,37 @@ async function focusedBar() {
 }
 
 export async function initialisePopup(render, reportError) {
-  const request = readState();
-  if (!request || request.phase !== 'opening' || request.packId !== widget.packId ||
-      !Object.hasOwn(popupSizes, request.type)) {
-    throw new Error('No valid popup request. Open the popup from the bar.');
-  }
-  let closing = false;
+  let request = null;
+  let closing = true;
+  let opening = false;
   let hasFocused = false;
   let stopSizing = () => {};
+
+  function disposeSession() {
+    if (!request) return;
+    closing = true;
+    hasFocused = false;
+    stopSizing();
+    stopSizing = () => {};
+    document.documentElement.removeAttribute('data-popup-ready');
+    // Unlike pagehide, this ends only the rendered session, not the WebView.
+    window.dispatchEvent(new Event('popup-session-end'));
+    request = null;
+  }
   async function close(automatic = false) {
-    if (closing) return;
+    if (closing || opening || !request) return;
+    const id = request.requestId;
     closing = true;
     try {
-      if (await dismissPopup(request.requestId, automatic) === false) closing = false;
+      if (await dismissPopup(id, automatic) === false && request?.requestId === id) closing = false;
     } catch (error) {
-      closing = false;
+      if (request?.requestId === id) closing = false;
       reportError(error);
     }
   }
   async function handleFocusChange(focused) {
+    const id = request?.requestId;
+    if (!id || opening || closing) return;
     if (focused) {
       hasFocused = true;
       return;
@@ -290,75 +352,113 @@ export async function initialisePopup(render, reportError) {
     if (!hasFocused) return;
     try {
       if (await widget.tauriWindow.isFocused()) return;
-      // A bar click performs its own atomic toggle/close; do not race it.
-      if (!await focusedBar()) await close(true);
+      // Never let a late blur from the previous session close its replacement.
+      if (!await focusedBar() && request?.requestId === id) await close(true);
     } catch (error) {
       reportError(error);
     }
   }
+  async function open(next) {
+    if (!next || next.phase !== 'opening' || next.packId !== widget.packId ||
+        !Object.hasOwn(popupSizes, next.type)) {
+      throw new Error('No valid popup request. Open the popup from the bar.');
+    }
+    disposeSession();
+    request = next;
+    closing = false;
+    opening = true;
+    try {
+      // Finish old provider unsubscriptions before subscribing the same config
+      // again; Zebar's shared provider hashes otherwise race with stopAll().
+      await waitForPopupSessionEnd();
+      const layout = next.layout;
+      document.documentElement.style.setProperty('--popup-max-height', `${layout.maxHeight}px`);
+      // Move while hidden before applying logical dimensions: on a different
+      // monitor Tauri must first pick up the target monitor's DPI.
+      const initial = popupPlacement(layout.monitor, layout.monitors,
+        layout.barPosition, layout.rect, { width: layout.width, height: layout.maxHeight });
+      await widget.tauriWindow.setPosition(new PhysicalPosition(
+        Math.round(layout.monitor.position.x + parseFloat(initial.offsetX) * layout.monitor.scaleFactor),
+        Math.round(layout.monitor.position.y + parseFloat(initial.offsetY) * layout.monitor.scaleFactor),
+      ));
+      await widget.tauriWindow.setSize(new LogicalSize(layout.width, parseFloat(initial.height)));
+      await render(next.type);
+      document.getElementById('close-popup').addEventListener('click', () => void close());
+      stopSizing = await attachPopupSizing({
+        main: document.querySelector('main'), maxHeight: layout.maxHeight,
+        Observer: ResizeObserver, reportError,
+        resize: async height => {
+          if (closing || request?.requestId !== next.requestId) return;
+          const placement = popupPlacement(layout.monitor, layout.monitors,
+            layout.barPosition, layout.rect, { width: layout.width, height });
+          await widget.tauriWindow.setSize(new LogicalSize(layout.width, parseFloat(placement.height)));
+          if (closing || request?.requestId !== next.requestId) return;
+          await widget.tauriWindow.setPosition(new PhysicalPosition(
+            Math.round(layout.monitor.position.x + parseFloat(placement.offsetX) * layout.monitor.scaleFactor),
+            Math.round(layout.monitor.position.y + parseFloat(placement.offsetY) * layout.monitor.scaleFactor),
+          ));
+        },
+      });
+      // Hidden WebViews can suspend requestAnimationFrame. Show the native
+      // window while CSS keeps it transparent, then reveal the resized frame.
+      await widget.tauriWindow.show();
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      if (request?.requestId !== next.requestId) throw new Error('Popup request was superseded.');
+      document.documentElement.setAttribute('data-popup-ready', 'true');
+      hasFocused = await widget.tauriWindow.isFocused();
+      localStorage.setItem(windowKey, widget.id);
+      opening = false;
+      await emit(readyEvent, { packId: widget.packId, requestId: next.requestId, popupId: widget.id });
+    } catch (error) {
+      disposeSession();
+      await emit(readyEvent, { packId: widget.packId, requestId: next.requestId,
+        error: error.message ?? String(error) });
+      throw error;
+    } finally {
+      if (!request || request.requestId === next.requestId) opening = false;
+    }
+  }
   const unlistenFocus = await widget.tauriWindow.onFocusChanged(({ payload }) => handleFocusChange(payload));
-  // WebView focus events also cover activation changes not delivered by Tauri.
+  const unlistenOpen = await listen(openEvent, ({ payload }) => {
+    const current = readState();
+    if (payload.packId !== widget.packId || payload.popupId !== widget.id ||
+        current?.phase !== 'opening' || current.requestId !== payload.requestId || opening) return;
+    void open(current).catch(reportError);
+  });
   const onFocus = () => { void handleFocusChange(true); };
   const onBlur = () => { void handleFocusChange(false); };
+  const onState = () => {
+    if (request && readState()?.requestId !== request.requestId) disposeSession();
+  };
+  const onStorage = event => { if (event.key === stateKey) onState(); };
   window.addEventListener('focus', onFocus);
   window.addEventListener('blur', onBlur);
+  window.addEventListener('storage', onStorage);
+  window.addEventListener('popup-state-changed', onState);
   document.addEventListener('keydown', event => {
-    if (event.key === 'Escape') {
+    if (event.key === 'Escape' && request) {
       event.preventDefault();
       void close();
     }
   });
-  document.getElementById('close-popup').addEventListener('click', () => void close());
   window.addEventListener('pagehide', () => {
-    stopSizing();
+    disposeSession();
     unlistenFocus();
+    unlistenOpen();
+    if (localStorage.getItem(windowKey) === widget.id) localStorage.removeItem(windowKey);
     window.removeEventListener('focus', onFocus);
     window.removeEventListener('blur', onBlur);
+    window.removeEventListener('storage', onStorage);
+    window.removeEventListener('popup-state-changed', onState);
   }, { once: true });
-  try {
-    const layout = request.layout;
-    document.documentElement.style.setProperty('--popup-max-height', `${layout.maxHeight}px`);
-    await render(request.type);
-    stopSizing = await attachPopupSizing({
-      main: document.querySelector('main'),
-      maxHeight: layout.maxHeight,
-      Observer: ResizeObserver,
-      reportError,
-      resize: async height => {
-        if (closing) return;
-        const placement = popupPlacement(layout.monitor, layout.monitors,
-          layout.barPosition, layout.rect, { width: layout.width, height });
-        await widget.tauriWindow.setSize(new LogicalSize(layout.width, parseFloat(placement.height)));
-        if (closing) return;
-        // PhysicalPosition is serialized as i32 by Tauri; mixed DPI and
-        // fractional DOM bounds can produce subpixel physical coordinates.
-        await widget.tauriWindow.setPosition(new PhysicalPosition(
-          Math.round(layout.monitor.position.x + parseFloat(placement.offsetX) * layout.monitor.scaleFactor),
-          Math.round(layout.monitor.position.y + parseFloat(placement.offsetY) * layout.monitor.scaleFactor),
-        ));
-      },
-    });
-    // Native resize completion can precede the WebView's next layout/paint.
-    // Keep the entire surface transparent until the resized frame is ready.
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    if (!closing) {
-      // The bar's persistent native watcher was armed before this window was
-      // created. No PowerShell startup/C# compilation on the popup's hot path.
-      document.documentElement.setAttribute('data-popup-ready', 'true');
-      if (await widget.tauriWindow.isFocused()) hasFocused = true;
-    }
-    // Even an immediate dismissal must release the bar's startup lifecycle lock.
-    await emit(readyEvent, {
-      packId: widget.packId,
-      requestId: request.requestId,
-      popupId: widget.id,
-    });
-  } catch (error) {
-    await emit(readyEvent, {
-      packId: widget.packId,
-      requestId: request.requestId,
-      error: error.message ?? String(error),
-    });
-    throw error;
+  const initial = readState();
+  await widget.tauriWindow.hide();
+  if (initial?.phase === 'warming' && initial.packId === widget.packId) {
+    // All imports have finished and the request listener is installed. Do not
+    // render providers, arm dismissal, show, focus, or wait for hidden frames.
+    localStorage.setItem(windowKey, widget.id);
+    await emit(readyEvent, { packId: widget.packId, requestId: initial.requestId, popupId: widget.id });
+  } else {
+    await open(initial);
   }
 }

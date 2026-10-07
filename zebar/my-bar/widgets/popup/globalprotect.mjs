@@ -3,6 +3,7 @@ import { executeGlobalProtect } from '../shared/globalprotect-model.mjs';
 import { retainPopupDuringInteraction } from '../shared/popup-controller.mjs';
 import { readSnapshot, writeSnapshot, clearSnapshot, vpnSnapshotValid } from '../shared/snapshot-cache.mjs';
 import { readBackgroundSnapshot } from '../shared/network-background.mjs';
+import { onPopupSessionEnd } from '../shared/popup-session.mjs';
 
 export function renderGlobalProtect(root, reportError) {
   const section = document.createElement('section');
@@ -161,12 +162,12 @@ export function renderGlobalProtect(root, reportError) {
   const interval = setInterval(() => void refresh(), 1000);
   const onStorage = event => { if (event.key === cacheKey) void refresh(); };
   window.addEventListener('storage', onStorage);
-  window.addEventListener('pagehide', () => {
+  onPopupSessionEnd(() => {
     window.removeEventListener('storage', onStorage);
     stopped = true;
     clearInterval(interval);
     finishPending();
-  }, { once: true });
+  });
   render();
   void refresh();
 }

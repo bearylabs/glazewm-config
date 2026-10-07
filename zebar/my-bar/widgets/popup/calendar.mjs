@@ -1,5 +1,6 @@
 import { calendarDays, dateKey, isoWeek, shiftMonth, yearProgress } from '../shared/popup-model.mjs';
 import { createIcon } from '../shared/icons.mjs';
+import { onPopupSessionEnd } from '../shared/popup-session.mjs';
 
 export function renderCalendar() {
   const locale = navigator.language;
@@ -27,7 +28,9 @@ export function renderCalendar() {
     return header;
   }));
 
+  let disposed = false;
   function fitCalendar() {
+    if (disposed) return;
     const root = document.documentElement;
     const main = document.querySelector('main');
     root.style.setProperty('--calendar-scale', '1');
@@ -137,6 +140,10 @@ export function renderCalendar() {
     changeMonth(event.deltaY > 0 ? 1 : -1);
   }, { passive: false });
   window.addEventListener('resize', fitCalendar);
+  onPopupSessionEnd(() => {
+    disposed = true;
+    window.removeEventListener('resize', fitCalendar);
+  });
   document.fonts?.ready.then(fitCalendar);
   draw(true);
 }

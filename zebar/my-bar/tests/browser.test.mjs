@@ -59,14 +59,23 @@ const mocks = `
     data.audio.defaultPlaybackDevice.isMuted = muted;
     notify();
   };
+  export function currentWidget() {
+    return { setZOrder: async order => calls.push(['z-order', order]) };
+  }
   export function createProviderGroup(config) {
+    const owned = [];
+    window.__test.providerStops ??= 0;
+    const register = fn => { owned.push(fn); listeners.push(fn); };
     const select = source => Object.fromEntries(Object.keys(config).map(key => [key, window.__holdNetwork && source === data && key === 'network' ? null : source[key] ?? null]));
     return {
       get outputMap() { return select(data); },
       get errorMap() { return select(errors); },
-      onOutput(fn) { listeners.push(() => fn(select(data))); queueMicrotask(() => fn(select(data))); },
-      onError(fn) { listeners.push(() => fn(select(errors))); },
-      stopAll: async () => {},
+      onOutput(fn) { register(() => fn(select(data))); queueMicrotask(() => fn(select(data))); },
+      onError(fn) { register(() => fn(select(errors))); },
+      stopAll: async () => {
+        window.__test.providerStops++;
+        for (const fn of owned) listeners.splice(listeners.indexOf(fn), 1);
+      },
     };
   }
   export async function shellExec(program, args) {
@@ -131,6 +140,7 @@ const mocks = `
 
 const controllerMock = `
   import { attachPopupSizing } from './popup-sizing.mjs';
+  import { waitForPopupSessionEnd } from './popup-session.mjs';
   export function retainPopupDuringInteraction() {
     window.__test.retained = true;
     return () => { window.__test.retained = false; };
@@ -139,7 +149,12 @@ const controllerMock = `
     try {
       const maxHeight = innerHeight;
       document.documentElement.style.setProperty('--popup-max-height', maxHeight + 'px');
-      await render(new URL(location.href).searchParams.get('type') ?? 'calendar');
+      window.__reopenPopup = async type => {
+        window.dispatchEvent(new Event('popup-session-end'));
+        await waitForPopupSessionEnd();
+        await render(type);
+      };
+      await window.__reopenPopup(new URL(location.href).searchParams.get('type') ?? 'calendar');
       window.__popupHeights = [];
       await attachPopupSizing({
         main: document.querySelector('main'), maxHeight, Observer: ResizeObserver, reportError,
@@ -284,9 +299,37 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert.deepEqual(result.triggers, ['calendar', 'bluetooth', 'network', 'audio', 'display', 'power']);
       assert.deepEqual(result.workspaces, ['One', '2']);
       assert.equal(result.modes, 'pauseresize');
-      assert.equal(result.bg, 'rgb(36, 39, 58)');
+      assert.equal(result.bg, 'rgb(30, 30, 46)');
       assert.deepEqual(result.calls.filter(call => call[0] === 'wm'), [['wm', 'focus --workspace 2']]);
       assert.equal(result.oldStats, false);
+    });
+    await t.test('center and right triggers only underline while their popup is open', async () => {
+      await load('bar');
+      const results = await evaluate(`(() => {
+        return [...document.querySelectorAll('.zone--center button, .zone--right button')].map(node => {
+          const originalColor = getComputedStyle(node).color;
+          node.classList.add('is-hovered');
+          const hover = getComputedStyle(node);
+          const result = { hoverBackground: hover.backgroundColor, hoverColor: hover.color,
+            originalColor, cursor: hover.cursor,
+            closedLine: getComputedStyle(node, '::after').content };
+          node.setAttribute('aria-expanded', 'true');
+          const line = getComputedStyle(node, '::after');
+          return { ...result, openBackground: getComputedStyle(node).backgroundColor,
+            openColor: getComputedStyle(node).color, openLine: line.content, lineHeight: line.height };
+        });
+      })()`);
+      assert.equal(results.length, 6);
+      for (const result of results) {
+        assert.equal(result.hoverBackground, 'rgba(0, 0, 0, 0)');
+        assert.equal(result.openBackground, 'rgba(0, 0, 0, 0)');
+        assert.equal(result.hoverColor, result.originalColor);
+        assert.equal(result.openColor, result.originalColor);
+        assert.equal(result.cursor, 'pointer');
+        assert.equal(result.closedLine, 'none');
+        assert.equal(result.openLine, '\"\"');
+        assert.equal(result.lineHeight, '2px');
+      }
     });
     await t.test('bar uses consistent filled icons and keeps status variants', async () => {
       await load('bar');
@@ -322,7 +365,10 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       })()`);
       assert.deepEqual(result, [], 'Repeated status snapshots must not reset active WebView tooltips.');
       await evaluate(`window.__test.data.audio.defaultPlaybackDevice.volume = 43; window.__test.notify()`);
-      assert.match(await evaluate("document.getElementById('audio-trigger').title"), /43%/);
+      assert.match(await evaluate("document.getElementById('audio-trigger').getAttribute('aria-label')"), /43%/);
+      assert.deepEqual(await evaluate(`[
+        ...document.querySelectorAll('.zone--center [title], .zone--right [title]')
+      ].map(node => node.id)`), []);
     });
     await t.test('battery icon shows AC, low, mid, full and unavailable status', async () => {
       await load('bar');
@@ -338,7 +384,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
         await evaluate(`window.__test.powerStatus = ${JSON.stringify({ ac, charge, battery })}; window.__refreshPower()`);
         const result = await evaluate(`(() => {
           const icon = document.getElementById('power-trigger');
-          return { state: icon.dataset.state, title: icon.title,
+          return { state: icon.dataset.state, label: icon.getAttribute('aria-label'),
             fill: Number(icon.querySelector('.battery__fill').getAttribute('height')),
             fillY: Number(icon.querySelector('.battery__fill').getAttribute('y')),
             bolt: getComputedStyle(icon.querySelector('.battery__bolt')).display !== 'none' };
@@ -349,7 +395,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
           assert(Math.abs(result.fill - 14 * charge) < 0.01);
           assert(Math.abs(result.fillY + result.fill - 20) < 0.01);
         }
-        if (ac === 'Online') assert.match(result.title, /Am Netz/);
+        if (ac === 'Online') assert.match(result.label, /Am Netz/);
       }
     });
     await t.test('left icon keeps showing and toggling tiling direction during fullscreen', async () => {
@@ -515,6 +561,36 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
           };
         })()`), { noScroll: true, fullyVisible: true, fits: true, days: 42 });
       }
+    });
+    await t.test('one WebView can reopen and change types without duplicate controls or provider listeners', async () => {
+      await load('audio');
+      const stopsBefore = await evaluate('window.__test.providerStops');
+      await evaluate("window.__reopenPopup('calendar')");
+      assert.equal(await evaluate('window.__test.providerStops'), stopsBefore + 1);
+      const month = await evaluate("document.getElementById('month-label').textContent");
+      await evaluate("document.getElementById('next-month').click()");
+      const nextMonth = await evaluate("document.getElementById('month-label').textContent");
+      assert.notEqual(nextMonth, month);
+      await evaluate("window.__reopenPopup('calendar')");
+      assert.equal(await evaluate("document.getElementById('month-label').textContent"), month);
+      await evaluate("document.getElementById('next-month').click()");
+      assert.equal(await evaluate("document.getElementById('month-label').textContent"), nextMonth,
+        'Exactly one navigation handler should fire after reopening.');
+      await evaluate("window.__reopenPopup('network')");
+      assert.equal(await evaluate("document.querySelectorAll('#globalprotect-toggle').length"), 1);
+      await evaluate("window.__reopenPopup('audio')");
+      assert.equal(await evaluate("document.querySelectorAll('#volume-slider').length"), 1);
+      assert.equal(await evaluate("document.querySelectorAll('#globalprotect-toggle').length"), 0);
+      assert.equal(await evaluate('window.__test.providerStops'), stopsBefore + 2);
+      await evaluate("window.__test.data.audio.defaultPlaybackDevice.volume = 71; window.__test.notify()");
+      assert.equal(await evaluate("document.getElementById('volume-slider').value"), '71');
+      await evaluate("window.__reopenPopup('audio')");
+      assert.equal(await evaluate('window.__test.providerStops'), stopsBefore + 3);
+      assert.equal(await evaluate("document.querySelectorAll('#volume-slider').length"), 1);
+      const vpnCalls = await evaluate("window.__test.calls.filter(call => call[0] === 'globalprotect').length");
+      await pause(1100);
+      assert.equal(await evaluate("window.__test.calls.filter(call => call[0] === 'globalprotect').length"), vpnCalls,
+        'Hidden/replaced Network sessions must not keep polling.');
     });
     await t.test('audio slider and mute send provider commands and reflect external updates', async () => {
       await load('audio');

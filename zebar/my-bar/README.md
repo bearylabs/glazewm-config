@@ -1,5 +1,17 @@
 # My bar
 
+## Bar background
+
+The bar uses Catppuccin Mocha Base (`#1e1e2e`). Its native window stays topmost so neighboring window shadows cannot darken the background when focus changes. GlazeWM fullscreen temporarily switches it to the normal layer so fullscreen can still cover the bar. Workspace highlights are unchanged. Restart Zebar after changing the initial layer in `zpack.json`.
+
+## Reusable popups
+
+Restart Zebar after updating. Bar startup preloads one native popup WebView and all its modules in the background. It starts as a transparent, nonfocused 1px surface outside the entire virtual desktop, then hides itself without rendering providers or waiting for animation frames. All monitor bars share one startup lock and cache, so they do not create duplicate windows. Once startup finishes, even the first click reuses the loaded WebView. A click during startup waits for completion; if prewarming fails, a real click retries normally.
+
+Subsequent openings, type changes and moves between monitor bars reuse the same WebView. Closing hides the window instead of destroying it. One hidden WebView stays alive until Zebar exits. No extra npm build or local SDK bundle is needed.
+
+Each opening gets fresh content and a new request ID. Hiding or replacing a session stops its providers, timers, sizing observer and storage/resize listeners; no popup polling continues while hidden. Provider unsubscriptions finish before the next session subscribes to the same config. Stale focus/outside-click requests cannot dismiss a replacement, and a destroyed or failed cached window is recreated on the next click. The native window is shown while CSS is still transparent before waiting for paint, because hidden WebViews can suspend animation frames.
+
 ## GlobalProtect in the Network popup
 
 The Network popup provides a Connect/Disconnect switch and a small Open client action for the official Windows GlobalProtect client installed under `%ProgramFiles%\Palo Alto Networks\GlobalProtect\PanGPA.exe`. Restart Zebar after changing `zpack.json` so it loads the new narrowly scoped shell permissions.

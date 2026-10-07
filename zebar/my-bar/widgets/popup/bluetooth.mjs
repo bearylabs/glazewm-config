@@ -1,6 +1,7 @@
 import * as zebar from 'https://esm.sh/zebar@3.3.1';
 import { bluetoothGroups, executeBluetooth, mergeBluetoothSnapshot, cachedBluetoothSnapshot, cacheBluetoothSnapshot, openBluetoothSettings } from '../shared/bluetooth-model.mjs';
 import { createIcon } from '../shared/icons.mjs';
+import { onPopupSessionEnd } from '../shared/popup-session.mjs';
 
 function node(tag, text, className = '') {
   const el = document.createElement(tag);
@@ -188,11 +189,11 @@ export function renderBluetooth(root) {
   // Paired-only status reads are separate from discovery and never disable controls.
   const statusTimer = setInterval(() => void run('status'), 10000);
   const scanTimer = setInterval(() => { if (state?.enabled) void run('scan'); }, 15000);
-  window.addEventListener('pagehide', () => {
+  onPopupSessionEnd(() => {
     disposed = true;
     clearInterval(statusTimer);
     clearInterval(scanTimer);
     for (const timer of followUpTimers) clearTimeout(timer);
     followUpTimers.clear();
-  }, { once: true });
+  });
 }

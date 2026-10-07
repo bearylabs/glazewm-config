@@ -7,7 +7,7 @@
       :root {
         color-scheme: dark;
         --ctp-crust: #181926;
-        --ctp-base: #24273a;
+        --ctp-base: #1e1e2e;
         --ctp-surface0: #363a4f;
         --ctp-surface1: #494d64;
         --ctp-overlay0: #6e738d;
@@ -61,7 +61,7 @@
         transition: background-color 120ms ease, color 120ms ease;
       }
       .split { color: var(--ctp-overlay0); }
-      .split:hover, .status.is-hovered, .status[aria-expanded='true'] {
+      .split:hover {
         background: var(--ctp-surface0);
         color: var(--ctp-text);
       }
@@ -124,7 +124,20 @@
         font-variant-numeric: tabular-nums;
         cursor: pointer;
       }
-      .clock.is-hovered, .clock[aria-expanded='true'] { background: var(--ctp-surface0); }
+      .clock, .status { position: relative; }
+      .clock[aria-expanded='true']::after,
+      .status[aria-expanded='true']::after {
+        content: '';
+        position: absolute;
+        left: 50%;
+        bottom: 0;
+        width: 16px;
+        height: 2px;
+        background: var(--ctp-lavender);
+        transform: translateX(-50%);
+        pointer-events: none;
+      }
+      .clock[aria-expanded='true']::after { width: calc(100% - 12px); }
       .status.is-muted { color: var(--ctp-overlay0); }
       .status .vol__muted, .status.is-muted .vol__on { display: none; }
       .status.is-muted .vol__muted { display: block; }
@@ -173,22 +186,22 @@
       </button>
     </div>
     <div class="zone zone--right">
-      <button class="status" id="bluetooth-trigger" type="button" title="Bluetooth"
+      <button class="status" id="bluetooth-trigger" type="button"
               aria-label="Open Bluetooth devices" aria-haspopup="dialog" aria-expanded="false" data-popup-trigger="bluetooth"></button>
-      <button class="status status--network" id="network-trigger" type="button" title="Network"
+      <button class="status status--network" id="network-trigger" type="button"
               aria-label="Open network information" aria-haspopup="dialog" aria-expanded="false"
               data-popup-trigger="network" data-link="none">
 
       </button>
-      <button class="status" id="audio-trigger" type="button" title="Audio"
+      <button class="status" id="audio-trigger" type="button"
               aria-label="Open audio controls" aria-haspopup="dialog" aria-expanded="false" data-popup-trigger="audio">
 
       </button>
-      <button class="status" id="display-trigger" type="button" title="Displays"
+      <button class="status" id="display-trigger" type="button"
               aria-label="Open display information" aria-haspopup="dialog" aria-expanded="false" data-popup-trigger="display">
 
       </button>
-      <button class="status status--power" id="power-trigger" type="button" title="Power &amp; system"
+      <button class="status status--power" id="power-trigger" type="button"
               aria-label="Open power and system information" aria-haspopup="dialog" aria-expanded="false" data-popup-trigger="power" data-state="unknown">
 
       </button>
@@ -200,6 +213,7 @@
       import { batteryIndicator, powerStatusArgs } from '../shared/battery-model.mjs';
       import { createIcon, createBatteryIcon } from '../shared/icons.mjs';
       import { startNetworkBackground } from '../shared/network-background.mjs';
+      import { createBarZOrder } from '../shared/bar-z-order.mjs';
 
       for (const [id, icons] of Object.entries({
         split: [['split-horizontal', 'split__horizontal'], ['split-vertical', 'split__vertical']],
@@ -225,6 +239,9 @@
         popupErrorEl.hidden = false;
       }
       popupErrorEl.addEventListener('click', () => { popupErrorEl.hidden = true; });
+      const updateBarZOrder = createBarZOrder(
+        order => zebar.currentWidget().setZOrder(order), reportPopupError,
+      );
       import('../shared/popup-controller.mjs').then(({ attachPopupTriggers }) => {
         attachPopupTriggers(
           [...document.querySelectorAll('[data-popup-trigger]')].map(trigger => ({
@@ -270,8 +287,7 @@
           const fill = powerEl.querySelector('.battery__fill');
           fill.setAttribute('height', String(fillHeight));
           fill.setAttribute('y', String(20 - fillHeight));
-          setTitle(powerEl, `${indicator.label}${failure ? ` — ${failure}` : ''}`);
-          powerEl.setAttribute('aria-label', `${indicator.label}. Open power and system information`);
+          powerEl.setAttribute('aria-label', `${indicator.label}${failure ? ` — ${failure}` : ''}. Open power and system information`);
           powerBusy = false;
         }
       }
@@ -295,6 +311,7 @@
         renderVolume(output.audio);
         renderNetwork(output.network);
         glazewm = output.glazewm;
+        updateBarZOrder(glazewm);
         renderWorkspaces(glazewm);
         renderModes(glazewm);
         renderSplit(glazewm);
@@ -303,7 +320,7 @@
       function renderVolume(audio) {
         const device = audio?.defaultPlaybackDevice;
         audioEl.classList.toggle('is-muted', device?.isMuted === true);
-        setTitle(audioEl, device
+        audioEl.setAttribute('aria-label', device
           ? `Audio -- ${device.name}, ${Number.isFinite(device.volume) ? Math.round(device.volume) + '%' : 'volume unavailable'}${device.isMuted ? ', muted' : ''}`
           : 'Audio -- no output device data');
       }
@@ -311,7 +328,7 @@
         const { tunnel, iface, link } = networkConnection(net);
         networkEl.dataset.link = link;
         networkEl.classList.toggle('is-vpn', Boolean(tunnel));
-        setTitle(networkEl, !net ? 'Network -- data unavailable' : [
+        networkEl.setAttribute('aria-label', !net ? 'Network -- data unavailable' : [
           link === 'none' ? 'No physical link' : link === 'wifi' ? 'Wi-Fi' : 'Ethernet',
           iface?.friendlyName ?? iface?.name,
           tunnel ? 'VPN (default-route heuristic)' : null,

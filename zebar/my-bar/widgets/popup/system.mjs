@@ -11,6 +11,7 @@ import { networkStatsCommand, networkMetrics } from '../shared/network-stats.mjs
 import { executeWifiRadio } from '../shared/wifi-radio.mjs';
 import { readSnapshot, writeSnapshot, clearSnapshot, radioSnapshotValid, networkSnapshotValid, trafficSnapshotValid } from '../shared/snapshot-cache.mjs';
 import { readBackgroundSnapshot } from '../shared/network-background.mjs';
+import { onPopupSessionEnd } from '../shared/popup-session.mjs';
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -57,12 +58,14 @@ function button(label, action) {
 
 function subscribe(config, render) {
   const group = zebar.createProviderGroup(config);
-  const update = () => render(group.outputMap, group.errorMap);
+  let disposed = false;
+  const update = () => { if (!disposed) render(group.outputMap, group.errorMap); };
   group.onOutput(update);
   group.onError(update);
-  window.addEventListener('pagehide', () => {
-    group.stopAll().catch(error => console.error('Stopping popup providers:', error));
-  }, { once: true });
+  onPopupSessionEnd(() => {
+    disposed = true;
+    return group.stopAll().catch(error => console.error('Stopping popup providers:', error));
+  });
   update();
   return group;
 }
@@ -286,32 +289,37 @@ function renderNetwork(root, reportError) {
     try {
       const backgroundRadio = !radioInitialized ? readBackgroundSnapshot(radioCacheKey, radioSnapshotValid) : null;
       radioInitialized = true;
-      radio = backgroundRadio ?? await executeWifiRadio(zebar.shellExec, 'status');
+      const next = backgroundRadio ?? await executeWifiRadio(zebar.shellExec, 'status');
+      if (statsClosed) return;
+      radio = next;
       radioVerified = true;
       if (!backgroundRadio) writeSnapshot(radioCacheKey, radio);
       wifiNote.hidden = true;
     }
     catch (error) {
+      if (statsClosed) return;
       radioVerified = false;
       clearSnapshot(radioCacheKey);
       wifiNote.textContent = error.message; wifiNote.hidden = false; wifiNote.classList.add('error');
     }
-    finally { radioQuerying = false; paintRadio(); }
+    finally { radioQuerying = false; if (!statsClosed) paintRadio(); }
   }
   async function changeWifi() {
-    if (!radioVerified || radioBusy || radioQuerying || !radio?.available) return;
+    if (statsClosed || !radioVerified || radioBusy || radioQuerying || !radio?.available) return;
     radioBusy = true; paintRadio(); wifiNote.hidden = true;
     try {
       const desired = !radio.enabled;
       const actual = await executeWifiRadio(zebar.shellExec, 'status');
+      if (statsClosed) return;
       radio = actual.enabled === desired ? actual : await executeWifiRadio(zebar.shellExec, desired ? 'on' : 'off');
+      if (statsClosed) return;
       writeSnapshot(radioCacheKey, radio);
       clearSnapshot(networkCacheKey);
       clearSnapshot(trafficCacheKey);
       previousStats = null;
       void updateStats();
     } catch (error) { wifiNote.textContent = error.message; wifiNote.hidden = false; wifiNote.classList.add('error'); }
-    finally { radioBusy = false; paintRadio(); }
+    finally { radioBusy = false; if (!statsClosed) paintRadio(); }
   }
   let previousStats = cachedTraffic?.snapshot ?? null;
   let previousTime = cachedTraffic?.time ?? 0;
@@ -338,6 +346,7 @@ function renderNetwork(root, reportError) {
         return;
       }
       const result = await zebar.shellExec('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', networkStatsCommand]);
+      if (statsClosed) return;
       if ((result.code ?? result.exitCode) !== 0) throw new Error(result.stderr || 'Network statistics unavailable.');
       const snapshot = JSON.parse(result.stdout.trim());
       latestStats = snapshot;
@@ -364,10 +373,10 @@ function renderNetwork(root, reportError) {
     if (event.key === radioCacheKey) void refreshRadio();
   };
   window.addEventListener('storage', onNetworkStorage);
-  window.addEventListener('pagehide', () => {
+  onPopupSessionEnd(() => {
     statsClosed = true; clearInterval(statsTimer);
     window.removeEventListener('storage', onNetworkStorage);
-  }, { once: true });
+  });
   renderGlobalProtect(root, reportError);
   function heading(icon, title, meta) {
     const node = hero(icon, title, meta);
@@ -547,7 +556,7 @@ function renderPower(root, reportError) {
     controls.append(control);
   }
   root.append(stats, actions, confirmation);
-  window.addEventListener('pagehide', () => clearTimeout(timer), { once: true });
+  onPopupSessionEnd(() => clearTimeout(timer));
   subscribe({
     battery: { type: 'battery', refreshInterval: 15000 },
     cpu: { type: 'cpu', refreshInterval: 3000 },
@@ -641,5 +650,7 @@ export function renderSystemPopup(type, reportError) {
   document.getElementById('month-label').textContent = {
     audio: 'Audio', network: 'Network', bluetooth: 'Bluetooth', display: 'Displays', power: 'Power & system',
   }[type];
-  return renderers[type](root, reportError);
+  let disposed = false;
+  onPopupSessionEnd(() => { disposed = true; });
+  return renderers[type](root, error => { if (!disposed) reportError(error); });
 }

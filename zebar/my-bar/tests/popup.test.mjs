@@ -18,9 +18,9 @@ test('popup owns narrowly scoped power privileges without changing bar docking',
   const pack = JSON.parse(await readFile(new URL('../zpack.json', import.meta.url), 'utf8'));
   const bar = pack.widgets.find(widget => widget.name === 'bar');
   const popup = pack.widgets.find(widget => widget.name === 'popup');
-  assert.equal(bar.zOrder, 'normal', 'Fullscreen must be able to cover the bar.');
+  assert.equal(bar.zOrder, 'top_most', 'Ordinary window shadows must stay below the bar.');
   assert(popup, 'Popup must be a top-level widget.');
-  assert.equal(popup.focused, true);
+  assert.equal(popup.focused, false, 'Background prewarming must not steal focus.');
   assert.equal(popup.shownInTaskbar, false);
   assert.equal(popup.zOrder, 'top_most');
   assert.equal(popup.transparent, true, 'Rounded popup corners need a transparent native surface.');
@@ -60,6 +60,14 @@ test('popup owns narrowly scoped power privileges without changing bar docking',
   assert(bar.includeFiles.includes('widgets/shared/**'));
   assert(popup.includeFiles.includes('widgets/popup/**'));
   assert(popup.includeFiles.includes('widgets/shared/**'));
+});
+
+test('prewarm popup configuration is transparent, nonfocused and absent from the taskbar', async () => {
+  const pack = JSON.parse(await readFile(new URL('../zpack.json', import.meta.url), 'utf8'));
+  const popup = pack.widgets.find(widget => widget.name === 'popup');
+  assert.equal(popup.focused, false);
+  assert.equal(popup.transparent, true);
+  assert.equal(popup.shownInTaskbar, false);
 });
 
 test('GlazeWM fullscreen uses the full monitor instead of the reserved work area', async () => {
@@ -149,6 +157,7 @@ async function loadController(context, mocks) {
     const dependencies = {
       './popup-model.mjs': { popupPlacement, popupSizes },
       './popup-sizing.mjs': { attachPopupSizing },
+      './popup-session.mjs': { waitForPopupSessionEnd: async () => {} },
       './popup-dismissal.mjs': { createOutsideClickWatcher, spawnOutsideClickProcess },
       'https://esm.sh/@tauri-apps/api@2.0.2/core': { invoke: async () => { throw new Error('Unexpected native command'); } },
       'https://esm.sh/@tauri-apps/api@2.0.2/dpi': {
@@ -165,12 +174,17 @@ async function loadController(context, mocks) {
   return module.namespace;
 }
 
-async function harness({ startError = null, locksAvailable = true, triggerBottom = 28, barHeight = 28 } = {}) {
+async function harness({ startError = null, warmError = null, holdWarm = false, reopenError = null,
+  locksAvailable = true, triggerBottom = 28, barHeight = 28,
+  monitors = [monitor(0, 0, 1920, 1080)],
+} = {}) {
   const values = new Map();
   const listeners = new Map();
   let nativeWindows = [];
   let queue = Promise.resolve();
   let startCount = 0;
+  let requestCount = 0;
+  let finishWarmup;
   let helperStartCount = 0;
   const placements = [];
   const errors = [];
@@ -197,7 +211,7 @@ async function harness({ startError = null, locksAvailable = true, triggerBottom
     const context = vm.createContext({
       console, Event, window, document, localStorage: storage,
       navigator: { locks: locksAvailable ? locks : undefined },
-      crypto: { randomUUID: () => `request-${id}-${startCount}` },
+      crypto: { randomUUID: () => `request-${id}-${++requestCount}` },
       setTimeout, clearTimeout,
     });
     const mocks = {
@@ -225,35 +239,63 @@ async function harness({ startError = null, locksAvailable = true, triggerBottom
         },
         startWidget: async (_, placement) => {
           const pendingRequest = JSON.parse(storage.getItem('my-bar:popup:my-bar'));
-          assert.equal(commands.at(-1), `arm:${pendingRequest.requestId}\n`, 'Native detection must be armed before creating the popup.');
+          if (pendingRequest.phase === 'warming') {
+            assert(!commands.some(command => command.startsWith('arm:')), 'Background startup must not arm outside-click detection.');
+            assert.equal(placement.width, '1px');
+            assert.equal(placement.height, '1px');
+            const target = monitors[0];
+            const x = target.position.x + parseFloat(placement.offsetX) * target.scaleFactor;
+            const y = target.position.y + parseFloat(placement.offsetY) * target.scaleFactor;
+            assert(x > Math.max(...monitors.map(item => item.position.x + item.size.width)), 'Warm outside the entire virtual desktop.');
+            assert(y > Math.max(...monitors.map(item => item.position.y + item.size.height)));
+            if (warmError) throw warmError;
+          } else {
+            assert.equal(commands.at(-1), `arm:${pendingRequest.requestId}\n`, 'Native detection must be armed before creating the popup.');
+          }
           if (startError) throw startError;
           placements.push(placement);
           startCount++;
           const label = `popup-${startCount}`;
-          nativeWindows.push({
-            label,
+          const nativeWindow = {
+            label, visible: pendingRequest.phase !== 'warming',
             title: async () => 'Zebar - my-bar / popup',
+            hide: async () => { nativeWindow.visible = false; },
+            show: async () => { nativeWindow.visible = true; },
             close: async () => {
               nativeWindows = nativeWindows.filter(item => item.label !== label);
             },
-          });
+          };
+          nativeWindows.push(nativeWindow);
+          storage.setItem('my-bar:popup:my-bar:window', label);
           const request = JSON.parse(storage.getItem('my-bar:popup:my-bar'));
-          for (const callback of listeners.values()) {
-            callback({ payload: { ...request, popupId: label } });
-          }
+          const ready = () => {
+            for (const callback of listeners.values()) callback({ payload: { ...request, popupId: label } });
+          };
+          if (holdWarm && request.phase === 'warming') finishWarmup = ready;
+          else ready();
         },
       },
       'https://esm.sh/@tauri-apps/api@2.0.2/window': {
         getAllWindows: async () => nativeWindows,
-        currentMonitor: async () => monitor(0, 0, 1920, 1080),
-        availableMonitors: async () => [monitor(0, 0, 1920, 1080)],
+        currentMonitor: async () => monitors[0],
+        availableMonitors: async () => monitors,
       },
       'https://esm.sh/@tauri-apps/api@2.0.2/event': {
         listen: async (_, callback) => {
           listeners.set(id, callback);
           return () => listeners.delete(id);
         },
-        emit: async () => {},
+        emit: async (event, payload) => {
+          assert.equal(event, 'my-bar:popup-open');
+          if (reopenError) throw reopenError;
+          const nativeWindow = nativeWindows.find(item => item.label === payload.popupId);
+          assert(nativeWindow);
+          const layout = payload.layout;
+          placements.push(popupPlacement(layout.monitor, layout.monitors, layout.barPosition,
+            layout.rect, { width: layout.width, height: layout.maxHeight }));
+          await nativeWindow.show();
+          for (const callback of listeners.values()) callback({ payload });
+        },
       },
     };
     mocks['https://esm.sh/@tauri-apps/api@2.0.2/core'] = {
@@ -320,7 +362,11 @@ async function harness({ startError = null, locksAvailable = true, triggerBottom
   }
   return {
     bar, errors, placements,
-    get nativeWindows() { return nativeWindows; },
+    finishWarmup: () => finishWarmup(),
+    seedState: state => storage.setItem('my-bar:popup:my-bar', JSON.stringify(state)),
+    get nativeWindows() { return nativeWindows.filter(item => item.visible); },
+    get allWindows() { return nativeWindows; },
+    async destroyCachedWindow() { await nativeWindows[0].close(); },
     get startCount() { return startCount; },
     get helperStartCount() { return helperStartCount; },
     state: () => JSON.parse(storage.getItem('my-bar:popup:my-bar')),
@@ -331,6 +377,78 @@ async function harness({ startError = null, locksAvailable = true, triggerBottom
     },
   };
 }
+
+test('bar startup preloads exactly one hidden popup across monitors before the first click', async () => {
+  const env = await harness({ monitors: [
+    monitor(-2560, -300, 2560, 1440, 1.5, 'left'),
+    monitor(0, 400, 3840, 2160, 2, 'right'),
+  ] });
+  const first = await env.bar('bar-1');
+  await env.bar('bar-2');
+  await env.settle();
+  assert.equal(env.startCount, 1);
+  assert.equal(env.allWindows.length, 1);
+  assert.equal(env.nativeWindows.length, 0);
+  assert.equal(env.state(), null);
+  for (const type of Object.keys(popupSizes)) assert.equal(first.expanded(type), 'false');
+  first.click('calendar');
+  await env.settle();
+  assert.equal(env.startCount, 1, 'The first real click must reuse the startup WebView.');
+  assert.equal(env.nativeWindows.length, 1);
+  assert.deepEqual(env.errors, []);
+  await env.bar('bar-3');
+  await env.settle();
+  assert.equal(env.state().type, 'calendar', 'A late-loading bar must not hide an active popup.');
+  assert.equal(env.startCount, 1);
+});
+
+test('startup recovers persisted active state from a previous Zebar process', async () => {
+  const env = await harness();
+  env.seedState({ phase: 'open', type: 'calendar', packId: 'my-bar', ownerId: 'old-bar', requestId: 'old-request' });
+  const bar = await env.bar('bar-1');
+  await env.settle();
+  assert.equal(env.state(), null);
+  assert.equal(env.startCount, 1);
+  assert.equal(env.nativeWindows.length, 0);
+  bar.click('calendar');
+  await env.settle();
+  assert.equal(env.startCount, 1);
+  assert.equal(env.state().ownerId, 'bar-1');
+  assert.deepEqual(env.errors, []);
+});
+
+test('a click during startup waits for prewarming without creating a duplicate or toggling it closed', async () => {
+  const env = await harness({ holdWarm: true });
+  const bar = await env.bar('bar-1');
+  for (let attempt = 0; attempt < 30 && !env.startCount; attempt++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(env.startCount, 1);
+  assert.equal(env.state().phase, 'warming');
+  bar.pointerDown('calendar');
+  bar.mouseClick('calendar');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(env.nativeWindows.length, 0);
+  env.finishWarmup();
+  await env.settle();
+  assert.equal(env.startCount, 1);
+  assert.equal(env.state().phase, 'open');
+  assert.equal(env.state().type, 'calendar');
+  assert.deepEqual(env.errors, []);
+});
+
+test('failed background prewarming leaves no active state and the first click can retry', async () => {
+  const env = await harness({ warmError: new Error('Background startup failed') });
+  const bar = await env.bar('bar-1');
+  await env.settle();
+  assert.equal(env.state(), null);
+  assert.equal(env.allWindows.length, 0);
+  assert.deepEqual(env.errors, [], 'Background failure is not a user-action error.');
+  bar.click('audio');
+  await env.settle();
+  assert.equal(env.state().phase, 'open');
+  assert.equal(env.state().type, 'audio');
+  assert.equal(env.nativeWindows.length, 1);
+  assert.deepEqual(env.errors, []);
+});
 
 test('same icon toggles, other monitor replaces, stale close cannot close replacement', async () => {
   const env = await harness();
@@ -368,7 +486,7 @@ test('switching popup types preserves one window, dimensions, and trigger-specif
       assert.equal(bar.expanded(other), String(other === type));
     }
   }
-  assert.equal(env.startCount, Object.keys(popupSizes).length);
+  assert.equal(env.startCount, 1, 'Changing types reuses the native WebView.');
   assert.deepEqual(env.errors, []);
 });
 
@@ -381,7 +499,7 @@ test('concurrent monitor clicks are serialized without duplicate windows', async
   await env.settle();
   assert.equal(env.nativeWindows.length, 1);
   assert.equal(env.state().ownerId, 'bar-2');
-  assert.equal(env.startCount, 2);
+  assert.equal(env.startCount, 1);
   assert.deepEqual(env.errors, []);
 });
 
@@ -405,7 +523,8 @@ test('mouse activation waits for click, and toggle intent survives blur before c
   const bar = await env.bar('bar-1');
   bar.pointerDown();
   await env.settle();
-  assert.equal(env.startCount, 0);
+  assert.equal(env.startCount, 1, 'Startup creates a hidden window, but pointerdown must not show it.');
+  assert.equal(env.nativeWindows.length, 0);
   bar.mouseClick();
   await env.settle();
   assert.equal(env.nativeWindows.length, 1);
@@ -441,10 +560,10 @@ test('trigger hover clears on activation and focus loss without a pointerleave',
   assert.deepEqual(env.errors, []);
 });
 
-async function popupHarness(initiallyFocused = false, type = 'calendar', layoutOverrides = {}) {
+async function popupHarness(initiallyFocused = false, type = 'calendar', layoutOverrides = {}, initialPhase = 'opening') {
   const request = {
     requestId: 'request-1', ownerId: 'bar-1', packId: 'my-bar',
-    type, phase: 'opening',
+    type, phase: initialPhase,
     layout: {
       monitor: monitor(-2560, -200, 2560, 1440, 1.5),
       monitors: [monitor(-2560, -200, 2560, 1440, 1.5)],
@@ -458,6 +577,10 @@ async function popupHarness(initiallyFocused = false, type = 'calendar', layoutO
   let focused = initiallyFocused;
   let focusHandler;
   let closed = false;
+  let visible = true;
+  let cachedId = null;
+  let openHandler;
+  const renders = [];
   const errors = [];
   const messages = [];
   const window = new EventTarget();
@@ -471,6 +594,7 @@ async function popupHarness(initiallyFocused = false, type = 'calendar', layoutO
       assert.equal(value, 'true');
       lifecycle.push('visible');
     },
+    removeAttribute(name) { assert.equal(name, 'data-popup-ready'); },
   };
   document.querySelector = () => ({ getBoundingClientRect: () => ({ height: 300 }) });
   const sizes = [];
@@ -479,6 +603,10 @@ async function popupHarness(initiallyFocused = false, type = 'calendar', layoutO
     label: 'popup-1',
     title: async () => 'Zebar - my-bar / popup',
     isFocused: async () => focused,
+    show: async () => { visible = true; lifecycle.push('show'); },
+    hide: async () => {
+      visible = false;
+    },
     setFocus: async () => { throw new Error('window.set_focus not allowed by ACL'); },
     setSize: async size => { sizes.push(size); lifecycle.push('size'); },
     setPosition: async position => {
@@ -499,15 +627,15 @@ async function popupHarness(initiallyFocused = false, type = 'calendar', layoutO
   const context = vm.createContext({
     console, Event, window, document, setTimeout, clearTimeout,
     ResizeObserver: class { observe() {} disconnect() {} },
-    requestAnimationFrame: callback => setImmediate(() => {
-      lifecycle.push('frame');
-      callback();
-    }),
+    requestAnimationFrame: callback => {
+      assert(visible, 'Do not wait for animation frames while the native WebView is hidden.');
+      return setImmediate(() => { lifecycle.push('frame'); callback(); });
+    },
     navigator: { locks: { request: (_, action) => Promise.resolve().then(action) } },
     localStorage: {
-      getItem: () => state,
-      setItem: (_, value) => { state = value; },
-      removeItem: () => { state = null; },
+      getItem: key => key.endsWith(':window') ? cachedId : state,
+      setItem: (key, value) => { if (key.endsWith(':window')) cachedId = value; else state = value; },
+      removeItem: key => { if (key.endsWith(':window')) cachedId = null; else state = null; },
     },
   });
   const controller = await loadController(context, {
@@ -521,16 +649,33 @@ async function popupHarness(initiallyFocused = false, type = 'calendar', layoutO
       availableMonitors: async () => [],
     },
     'https://esm.sh/@tauri-apps/api@2.0.2/event': {
-      listen: async () => () => {},
+      listen: async (event, callback) => {
+        assert.equal(event, 'my-bar:popup-open');
+        openHandler = callback;
+        return () => { openHandler = null; };
+      },
       emit: async (_, payload) => { messages.push(payload); lifecycle.push('ready'); },
     },
   });
-  await controller.initialisePopup(() => {}, error => errors.push(error));
+  await controller.initialisePopup(type => { renders.push(type); }, error => errors.push(error));
   return {
-    errors, messages, sizes, positions, lifecycle,
+    errors, messages, sizes, positions, lifecycle, renders,
+    window, document,
+    state: () => state ? JSON.parse(state) : null,
+    async reopen(type = 'calendar', layout = {}) {
+      const next = { ...request, type, phase: 'opening', requestId: `request-${messages.length + 1}`,
+        layout: { ...request.layout, ...layout } };
+      state = JSON.stringify(next);
+      openHandler({ payload: { ...next, popupId: 'popup-1' } });
+      for (let attempt = 0; attempt < 50 && messages.at(-1)?.requestId !== next.requestId; attempt++) {
+        await new Promise(resolve => setImmediate(resolve));
+      }
+      assert.equal(messages.at(-1)?.requestId, next.requestId, 'Reopening must acknowledge the new request.');
+    },
     retain: controller.retainPopupDuringInteraction,
-    dismiss: () => controller.dismissPopup('request-1'),
-    get closed() { return closed; },
+    dismiss: () => controller.dismissPopup(state ? JSON.parse(state).requestId : null),
+    get closed() { return !visible; },
+    get destroyed() { return closed; },
     async focus(value) {
       focused = value;
       await focusHandler({ payload: value });
@@ -544,6 +689,20 @@ async function popupHarness(initiallyFocused = false, type = 'calendar', layoutO
     },
   };
 }
+
+test('prewarm initialisation hides the native window without rendering, showing, focusing or waiting for frames', async () => {
+  const popup = await popupHarness(false, 'calendar', {}, 'warming');
+  assert.equal(popup.closed, true);
+  assert.deepEqual(popup.renders, []);
+  assert.deepEqual(popup.lifecycle, ['ready']);
+  assert.equal(popup.messages[0].popupId, 'popup-1');
+  assert.equal(popup.sizes.length, 0);
+  assert.equal(popup.positions.length, 0);
+  await popup.reopen('audio');
+  assert.equal(popup.closed, false);
+  assert.deepEqual(popup.renders, ['audio']);
+  assert.deepEqual(popup.errors, []);
+});
 
 test('network client/MFA focus loss retains the popup until the operation ends', async () => {
   const popup = await popupHarness(true, 'network');
@@ -611,7 +770,7 @@ test('initially unfocused popup ignores startup blur and closes only after real 
   assert.equal(popup.closed, false, 'Initial negative focus snapshot must not dismiss the popup.');
   assert.equal(popup.messages[0].popupId, 'popup-1');
   assert.equal(popup.sizes[0].width, 328);
-  assert.equal(popup.sizes[0].height, 304, 'Native height follows the measured content plus border/padding.');
+  assert.equal(popup.sizes[1].height, 304, 'Native height follows the measured content plus border/padding.');
   assert.equal(popup.positions[0].x, -2176);
   assert.equal(popup.positions[0].y, -158, 'Resizing preserves the bar anchor at mixed DPI.');
   await popup.focus(false);
@@ -639,7 +798,7 @@ test('native positioning rounds fractional physical coordinates at mixed DPI', a
 
 test('popup stays transparent until native sizing and the resized frame are ready', async () => {
   const popup = await popupHarness();
-  assert.deepEqual(popup.lifecycle, ['size', 'position', 'frame', 'frame', 'visible', 'ready']);
+  assert.deepEqual(popup.lifecycle, ['position', 'size', 'size', 'position', 'show', 'frame', 'frame', 'visible', 'ready']);
   const html = await readFile(new URL('../widgets/popup/index.html', import.meta.url), 'utf8');
   const initialBody = html.match(/\n      body \{([\s\S]*?)\n      \}/)?.[1];
   assert.match(initialBody, /background: transparent/);
@@ -688,5 +847,86 @@ test('positive startup focus snapshot arms outside-click dismissal', async () =>
   assert.equal(popup.closed, false);
   await popup.focus(false);
   assert.equal(popup.closed, true);
+  assert.deepEqual(popup.errors, []);
+});
+
+test('closing and reopening uses the same native window, including after changing type or owner', async () => {
+  const env = await harness();
+  const first = await env.bar('bar-1');
+  const second = await env.bar('bar-2');
+  first.click('calendar');
+  await env.settle();
+  const original = env.state();
+  await first.dismiss(original.requestId);
+  assert.equal(env.nativeWindows.length, 0);
+  assert.equal(env.allWindows.length, 1, 'Dismiss hides, it does not destroy the WebView.');
+  second.click('network');
+  await env.settle();
+  assert.equal(env.startCount, 1);
+  assert.equal(env.state().popupId, original.popupId);
+  assert.notEqual(env.state().requestId, original.requestId);
+  assert.equal(env.state().ownerId, 'bar-2');
+  second.click('network');
+  await env.settle();
+  first.click('calendar');
+  await env.settle();
+  assert.equal(env.startCount, 1);
+  assert.equal(env.nativeWindows.length, 1);
+  assert.deepEqual(env.errors, []);
+});
+
+test('a destroyed cached WebView is recreated instead of waiting on a stale label', async () => {
+  const env = await harness();
+  const bar = await env.bar('bar-1');
+  bar.click();
+  await env.settle();
+  await bar.dismiss(env.state().requestId);
+  await env.destroyCachedWindow();
+  bar.click('audio');
+  await env.settle();
+  assert.equal(env.startCount, 2);
+  assert.equal(env.nativeWindows.length, 1);
+  assert.equal(env.state().type, 'audio');
+  assert.deepEqual(env.errors, []);
+});
+
+test('failed reuse destroys the broken cache and a later click creates a fresh WebView', async () => {
+  const env = await harness({ reopenError: new Error('Popup listener unavailable') });
+  const bar = await env.bar('bar-1');
+  await env.settle(); // The startup cache exists without a preceding click.
+  bar.click('audio');
+  await env.settle();
+  assert.equal(env.errors.length, 1);
+  assert.equal(env.state(), null);
+  assert.equal(env.allWindows.length, 0);
+  bar.click('audio');
+  await env.settle();
+  assert.equal(env.startCount, 2);
+  assert.equal(env.state().type, 'audio');
+});
+
+test('a reused popup disposes each session and renders a fresh request at its new monitor DPI', async () => {
+  const popup = await popupHarness(true);
+  let ended = 0;
+  popup.window.addEventListener('popup-session-end', () => { ended++; });
+  await popup.dismiss();
+  assert.equal(ended, 1);
+  assert.equal(popup.destroyed, false);
+  const display = monitor(1920, 0, 2560, 1440, 2);
+  await popup.reopen('network', {
+    monitor: display, monitors: [display], barPosition: display.position,
+    rect: { left: 400, width: 40, bottom: 28 }, width: 380, maxHeight: 500,
+  });
+  assert.equal(popup.closed, false);
+  assert.equal(popup.sizes.at(-1).width, 380);
+  assert.equal(popup.positions.at(-1).x, 2380);
+  assert.equal(popup.positions.at(-1).y, 56);
+  assert.deepEqual(popup.renders, ['calendar', 'network']);
+  assert.equal(popup.messages.at(-1).requestId, 'request-2');
+  await popup.dismiss();
+  assert.equal(ended, 2);
+  await popup.reopen('audio');
+  assert.deepEqual(popup.renders, ['calendar', 'network', 'audio']);
+  assert.equal(popup.destroyed, false);
   assert.deepEqual(popup.errors, []);
 });

@@ -11,7 +11,7 @@
     {
       "name": "bar",
       "htmlPath": "./widgets/bar/index.html",
-      "zOrder": "normal",
+      "zOrder": "top_most",
       "shownInTaskbar": false,
       "focused": false,
       "resizable": false,
@@ -72,7 +72,7 @@
       "htmlPath": "./widgets/popup/index.html",
       "zOrder": "top_most",
       "shownInTaskbar": false,
-      "focused": true,
+      "focused": false,
       "resizable": false,
       "transparent": true,
       "includeFiles": [
