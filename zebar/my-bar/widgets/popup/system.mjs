@@ -1,6 +1,6 @@
 import * as zebar from 'https://esm.sh/zebar@3.3.1';
 import { availableMonitors, currentMonitor } from 'https://esm.sh/@tauri-apps/api@2.0.2/window';
-import { networkConnection, linkRate } from '../shared/network-model.mjs';
+import { networkConnection, linkRate, ipv4 } from '../shared/network-model.mjs';
 import { outputVolumeName, selectOutputDevice } from '../shared/audio-model.mjs';
 import { createBatteryIcon, createIcon } from '../shared/icons.mjs';
 import { diskUsage, executePowerAction, gib, percent, powerCommands } from '../shared/system-model.mjs';
@@ -224,7 +224,12 @@ function renderAudio(root, reportError) {
 
 function renderNetwork(root, reportError) {
   const connection = element('div');
-  root.append(connection);
+  const diagnostics = element('details', undefined, 'network-diagnostics');
+  diagnostics.hidden = true;
+  const summary = element('summary', 'Connection details');
+  const diagnosticContent = element('div');
+  diagnostics.append(summary, diagnosticContent);
+  root.append(connection, diagnostics);
   renderGlobalProtect(root, reportError);
   function heading(icon, title, meta) {
     const node = hero(icon, title, meta);
@@ -234,17 +239,10 @@ function renderNetwork(root, reportError) {
     label.title = title;
     return node;
   }
-  function section(title, entries, state) {
-    const node = element('section', undefined, 'network-section');
-    const header = element('div', undefined, 'network-section__heading');
-    header.append(element('h2', title));
-    if (state) header.append(element('span', state, 'network-section__state'));
-    node.append(header, details(entries, 'network-details'));
-    return node;
-  }
   subscribe({ network: { type: 'network', refreshInterval: 5000 } }, (output, errors) => {
     const net = output.network;
     if (!net) {
+      diagnostics.hidden = true;
       connection.replaceChildren(heading('wifi-off', 'No connection', 'NETWORK DATA UNAVAILABLE'), unavailable('Network', errors.network));
       return;
     }
@@ -257,29 +255,23 @@ function renderNetwork(root, reportError) {
     const nodes = [
       heading(link === 'wifi' ? 'wifi' : link === 'ethernet' ? 'ethernet' : 'wifi-off',
         detail ? `${name} (${detail})` : name || kind, link === 'none' ? 'NOT CONNECTED' : `${kind.toUpperCase()} CONNECTION`),
-      section('Connection', [
-        ['Link', kind],
-        ['Adapter', iface?.friendlyName ?? iface?.name],
-        ['Link rate', rate],
-        ...(link === 'wifi' ? [['Signal', Number.isFinite(signal) ? `${percent(signal)} signal` : 'Unavailable']] : []),
-      ]),
-      section('Addresses', [
-        ['IPv4', iface?.ipv4Addresses?.join('\n') || 'Unavailable'],
-        ['IPv6', iface?.ipv6Addresses?.join('\n') || 'Unavailable'],
-      ]),
     ];
-    if (tunnel) {
-      nodes.push(section('Company VPN', [
-        ['Adapter', tunnel.friendlyName ?? tunnel.name],
-        ['IPv4', tunnel.ipv4Addresses?.join('\n') || 'Unavailable'],
-        ['IPv6', tunnel.ipv6Addresses?.join('\n') || 'Unavailable'],
-      ], 'VPN active'));
-    } else {
-      const state = element('p', 'Physical default route', 'note network-direct');
-      nodes.push(state);
-    }
+    if (iface) nodes.push(details([
+      ['IP Address', ipv4(iface) || '--'],
+      ...(link === 'wifi' && rate ? [['Link rate', rate]] : []),
+    ], 'network-details network-overview'));
+    diagnostics.hidden = !iface && !tunnel;
+    diagnosticContent.replaceChildren(details([
+      ...(iface ? [
+        ['Adapter', iface.friendlyName ?? iface.name],
+        ...(iface.ipv6Addresses?.length ? [['IPv6', iface.ipv6Addresses.join('\n')]] : []),
+      ] : []),
+      ...(tunnel ? [
+        ['VPN route', tunnel.friendlyName ?? tunnel.name],
+        ...(ipv4(tunnel) ? [['Tunnel IP', ipv4(tunnel)]] : []),
+      ] : []),
+    ], 'network-details'));
     if (errors.network) nodes.push(unavailable('Network', errors.network));
-    nodes.push(element('p', 'Route details use the default route; GlobalProtect status below also detects split tunnels. This is not an internet reachability check.', 'note network-note'));
     connection.replaceChildren(...nodes);
   });
 }

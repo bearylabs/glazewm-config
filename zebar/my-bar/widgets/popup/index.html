@@ -271,17 +271,31 @@
       .network-section { margin-top: 12px; padding-top: 12px; border-top: 1px solid color-mix(in srgb, var(--text) 18%, transparent); }
       .network-section__heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
       .panel .network-section h2 { margin: 0; color: var(--panel-caption); font-size: 10px; font-weight: 700; letter-spacing: 1px; }
-      .network-section__state { color: var(--text); font-size: 10px; font-weight: 700; white-space: nowrap; }
-      .network-vpn__actions { display: flex; gap: 8px; }
-      .network-vpn__actions button { padding: 8px 12px; background: var(--mantle); border: 1px solid var(--surface-1); }
-      .network-vpn__actions button:hover { background: var(--surface); }
-      #globalprotect-toggle { flex: 1; }
+      .network-section__state { color: var(--panel-caption); font-size: 10px; white-space: nowrap; }
+      .network-vpn__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 10px; }
+      .network-vpn[data-connected='true'] .network-vpn__row { background: var(--audio-selected); }
+      .network-vpn__labels { display: grid; gap: 2px; min-width: 0; }
+      #globalprotect-name { font-size: 12px; }
+      .network-vpn__actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+      .network-vpn__actions button { border: 1px solid transparent; border-radius: 0; background: transparent; }
+      .network-vpn__actions button:hover, .network-vpn__actions button:focus-visible { border-color: var(--audio-outline); background: var(--audio-hover); outline: none; }
+      .panel .network-vpn__open { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; font-size: 18px; }
+      .panel .network-vpn__switch { display: grid; place-items: center; width: 54px; height: 34px; padding: 6px; border: 0; }
+      .panel .network-vpn__switch:hover, .panel .network-vpn__switch:focus-visible { background: transparent; box-shadow: inset 0 0 0 1px var(--audio-outline); }
+      .network-vpn__track { display: block; position: relative; width: 42px; height: 22px; border: 1px solid color-mix(in srgb, var(--text) 40%, transparent); background: color-mix(in srgb, var(--text) 4%, transparent); }
+      .network-vpn__knob { position: absolute; left: 2px; top: 2px; width: 16px; height: 16px; background: var(--panel-caption); transition: transform 120ms ease, background 120ms ease; }
+      .network-vpn__switch[aria-checked='true'] .network-vpn__track { border-color: transparent; background: var(--audio-selected); }
+      .network-vpn__switch[aria-checked='true'] .network-vpn__knob { transform: translateX(20px); background: var(--text); }
       .network-details { display: grid; gap: 4px; }
-      .network-details > div { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 14px; align-items: baseline; }
-      .panel .network-details dt { color: var(--panel-caption); font-size: 11px; }
-      .panel .network-details dd { min-width: 0; margin: 0; color: var(--text); font-size: 12px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
-      .panel .network-note { margin: 12px 0 0; padding-top: 12px; border-top: 1px solid color-mix(in srgb, var(--text) 18%, transparent); color: var(--panel-caption); }
-      .panel .network-direct { margin: 12px 0 0; color: var(--panel-caption); }
+      .network-details > div { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 20px; align-items: baseline; }
+      .panel .network-details dt { color: color-mix(in srgb, var(--text) 60%, transparent); font-size: 11px; }
+      .panel .network-details dd { min-width: 0; margin: 0; color: var(--text); font-size: 11px; text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+      .network-diagnostics { margin-top: 12px; color: var(--panel-caption); font-size: 10px; }
+      .network-diagnostics summary { width: fit-content; cursor: pointer; }
+      .network-diagnostics summary:focus-visible { outline: 1px solid var(--audio-outline); outline-offset: 3px; }
+      .network-diagnostics[open] summary { margin-bottom: 8px; }
+      .panel .network-note { margin: 8px 10px 0; color: var(--panel-caption); font-size: 11px; }
+      .panel .network-note.error { color: var(--red); }
       .panel .audio-switch { display: grid; place-items: center; flex: 0 0 54px; width: 54px; height: 34px; padding: 6px; background: transparent; border: 1px solid transparent; border-radius: 0; }
       .panel .audio-switch:hover, .panel .audio-switch:focus-visible { border-color: var(--audio-outline); background: transparent; outline: none; }
       .audio-switch__track { display: block; position: relative; width: 42px; height: 22px; border: 1px solid color-mix(in srgb, var(--text) 40%, transparent); background: color-mix(in srgb, var(--text) 4%, transparent); }

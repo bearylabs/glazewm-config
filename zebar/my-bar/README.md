@@ -2,7 +2,9 @@
 
 ## GlobalProtect in the Network popup
 
-The Network popup provides Connect, Disconnect, and Open client for the official Windows GlobalProtect client installed under `%ProgramFiles%\Palo Alto Networks\GlobalProtect\PanGPA.exe`. Restart Zebar after changing `zpack.json` so it loads the new narrowly scoped shell permissions.
+The Network popup provides a Connect/Disconnect switch and a small Open client action for the official Windows GlobalProtect client installed under `%ProgramFiles%\Palo Alto Networks\GlobalProtect\PanGPA.exe`. Restart Zebar after changing `zpack.json` so it loads the new narrowly scoped shell permissions.
+
+The default view shows the connection hero, IP address, Wi-Fi link rate (Ethernet speed is already in the hero), and one GlobalProtect row. Adapter, IPv6, and default-route tunnel diagnostics are available under Connection details; explanatory status/MFA text appears only when needed.
 
 Status is polled every five seconds from the PANGP/GlobalProtect adapter (up, with a non-link-local IPv4 address), independently of the default route, so split tunnels are included. This is an adapter-level indication, not an internet or gateway reachability test.
 

@@ -9,25 +9,47 @@ export function renderGlobalProtect(root, reportError) {
   const header = document.createElement('div');
   header.className = 'network-section__heading';
   const title = document.createElement('h2');
-  title.textContent = 'GlobalProtect';
+  title.textContent = 'VPN';
+  header.append(title);
+  const row = document.createElement('div');
+  row.className = 'network-vpn__row';
+  const labels = document.createElement('div');
+  labels.className = 'network-vpn__labels';
+  const name = document.createElement('span');
+  name.id = 'globalprotect-name';
+  name.textContent = 'GlobalProtect';
   const state = document.createElement('span');
   state.className = 'network-section__state';
   state.setAttribute('role', 'status');
-  header.append(title, state);
+  labels.append(name, state);
   const controls = document.createElement('div');
   controls.className = 'network-vpn__actions';
   const toggle = document.createElement('button');
   toggle.id = 'globalprotect-toggle';
   toggle.type = 'button';
+  toggle.className = 'network-vpn__switch';
+  toggle.setAttribute('role', 'switch');
+  const track = document.createElement('span');
+  track.className = 'network-vpn__track';
+  track.setAttribute('aria-hidden', 'true');
+  const knob = document.createElement('span');
+  knob.className = 'network-vpn__knob';
+  track.append(knob);
+  toggle.append(track);
   const open = document.createElement('button');
   open.id = 'globalprotect-open';
   open.type = 'button';
-  open.textContent = 'Open client';
-  controls.append(toggle, open);
+  open.textContent = '↗';
+  open.className = 'network-vpn__open';
+  open.setAttribute('aria-label', 'Open GlobalProtect client');
+  open.title = 'Open GlobalProtect client';
+  controls.append(open, toggle);
+  row.append(labels, controls);
   const note = document.createElement('p');
   note.className = 'note network-note';
-  note.textContent = 'Status uses the VPN adapter, including split tunnels. Login/MFA stays in the official client.';
-  section.append(header, controls, note);
+  note.hidden = true;
+  section.title = 'Status reflects the VPN adapter, including split tunnels; not a reachability test.';
+  section.append(header, row, note);
   root.append(section);
 
   let snapshot = null;
@@ -46,13 +68,17 @@ export function renderGlobalProtect(root, reportError) {
     state.textContent = error ? 'Status unavailable' : !snapshot ? 'Checking…'
       : !snapshot.available ? 'Not installed' : pending ? (pending.connected ? 'Connecting…' : 'Disconnecting…')
         : snapshot.connected ? 'Connected' : 'Disconnected';
-    toggle.textContent = pending ? 'Please wait…' : snapshot?.connected ? 'Disconnect' : 'Connect';
+    const actionLabel = pending ? 'VPN operation in progress' : snapshot?.connected ? 'Disconnect GlobalProtect' : 'Connect GlobalProtect';
+    toggle.setAttribute('aria-label', actionLabel);
+    toggle.title = actionLabel;
+    toggle.setAttribute('aria-checked', String(Boolean(snapshot?.connected)));
+    section.dataset.connected = String(Boolean(snapshot?.connected));
     toggle.disabled = busy || Boolean(pending) || Boolean(error) || !snapshot?.available;
     open.disabled = busy || snapshot?.available === false;
     section.setAttribute('aria-busy', String(busy || Boolean(pending)));
-    note.textContent = error || (pending?.connected
-      ? 'Complete login/MFA in the GlobalProtect client. The connection is not confirmed yet.'
-      : 'Status uses the VPN adapter, including split tunnels. Login/MFA stays in the official client.');
+    note.textContent = error || (pending?.connected ? 'Complete login/MFA in the GlobalProtect client.' : '');
+    note.hidden = !note.textContent;
+    note.classList.toggle('error', Boolean(error));
   }
   async function refresh() {
     if (querying || busy || stopped) return;

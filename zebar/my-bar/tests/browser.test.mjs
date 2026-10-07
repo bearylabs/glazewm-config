@@ -621,11 +621,17 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert.match(result.font, /JetBrainsMono/);
       assert.equal(result.padding, '14px');
       assert.equal(result.radius, '0px');
-      assert.deepEqual(result.sections, ['Connection', 'Addresses', 'Company VPN', 'GlobalProtect']);
+      assert.deepEqual(result.sections, ['VPN']);
       assert.equal(result.flat, true);
       assert.equal(result.controls, 2);
-      assert.equal(result.vpn, 'VPN active');
+      assert.equal(result.vpn, 'Disconnected');
       assert.equal(result.fits, true);
+      assert.equal(await evaluate("document.querySelector('.network-diagnostics').open"), false);
+      assert(await evaluate("document.querySelector('.network-vpn .note').hidden"));
+      assert.equal(await evaluate("document.querySelector('.network-overview dd').textContent"), '192.168.1.2');
+      assert.equal(await evaluate("document.getElementById('globalprotect-toggle').getAttribute('role')"), 'switch');
+      assert.equal(await evaluate("document.getElementById('globalprotect-open').getAttribute('aria-label')"), 'Open GlobalProtect client');
+      assert(await evaluate("document.getElementById('system-content').scrollHeight < 260"));
       if (process.env.NETWORK_SCREENSHOT_PATH) {
         await evaluate(`window.__test.data.network.defaultGateway.ssid = 'Office Wi-Fi'; window.__test.notify()`);
         await pause(50);
@@ -634,6 +640,13 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
           format: 'png', clip: { x: 0, y: 0, width: popupSizes.network.width, height, scale: 1 },
         });
         await writeFile(process.env.NETWORK_SCREENSHOT_PATH, Buffer.from(data, 'base64'));
+        await evaluate('window.__test.globalprotect = { available: true, connected: true }; window.__refreshGlobalProtect()');
+        await pause(150); // Let the Omarchy-style switch finish its knob transition.
+        const connected = await client.call('Page.captureScreenshot', {
+          format: 'png', clip: { x: 0, y: 0, width: popupSizes.network.width, height, scale: 1 },
+        });
+        await writeFile(process.env.NETWORK_SCREENSHOT_PATH.replace(/\.png$/, '-connected.png'), Buffer.from(connected.data, 'base64'));
+        await evaluate('window.__test.globalprotect.connected = false; window.__refreshGlobalProtect()');
       }
       await evaluate(`window.__test.data.network = {
         defaultInterface: { name: 'Ethernet adapter', type: 'ethernet', receiveSpeed: 2.5e9,
@@ -641,17 +654,24 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       }; window.__test.notify()`);
       assert.equal(await evaluate("document.getElementById('network-title').textContent"), 'Ethernet (2.5 Gb/s)');
       assert.equal(await evaluate("document.querySelector('.hero__meta').textContent"), 'ETHERNET CONNECTION');
-      assert.equal(await evaluate("document.querySelectorAll('.network-section').length"), 3);
-      assert.match(await evaluate("document.getElementById('system-content').textContent"), /Physical default route/);
+      assert.equal(await evaluate("document.querySelectorAll('.network-section').length"), 1);
+      assert.equal(await evaluate("document.querySelectorAll('.network-overview dt').length"), 1, 'Ethernet speed is already in the hero.');
+      assert.equal(await evaluate("document.querySelector('.network-overview dd').textContent"), '10.0.0.2');
+      assert.equal(await evaluate("document.querySelector('.network-diagnostics').open"), false);
       await evaluate(`window.__test.data.network = { defaultInterface: null, interfaces: [] }; window.__test.notify()`);
       assert.equal(await evaluate("document.getElementById('network-title').textContent"), 'No physical connection');
       assert.equal(await evaluate("document.querySelector('.hero__meta').textContent"), 'NOT CONNECTED');
-      assert.match(await evaluate("document.getElementById('system-content').textContent"), /Unavailable/);
+      assert(await evaluate("document.querySelector('.network-diagnostics').hidden"));
+      assert.equal(await evaluate("document.querySelector('.network-overview')"), null);
       await evaluate(`window.__test.data.network = { defaultInterface: {
         name: 'Adapter '.repeat(40), type: 'wifi', ipv4Addresses: ['10.0.0.2'],
         ipv6Addresses: Array.from({ length: 40 }, (_, i) => '2001:db8::' + i),
       } }; window.__test.notify()`);
       assert.equal(await evaluate("document.querySelector('.hero__title').textContent.includes('%')"), false);
+      await evaluate("document.querySelector('.network-diagnostics').open = true");
+      await pause(30);
+      await evaluate('window.__test.notify()');
+      assert(await evaluate("document.querySelector('.network-diagnostics').open"), 'Provider refresh must preserve expanded diagnostics.');
       const overflow = await evaluate(`(() => {
         const panel = document.getElementById('system-content');
         panel.scrollTop = panel.scrollHeight;
@@ -661,10 +681,52 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert(overflow.body <= overflow.height && overflow.scroll > 0 && overflow.width <= overflow.clientWidth,
         JSON.stringify(overflow));
     });
+    await t.test('VPN action hover stays aligned with the icon and centered switch track', async () => {
+      await load('network');
+      await evaluate('window.__refreshGlobalProtect()');
+      const geometry = await evaluate(`(() => {
+        const open = document.getElementById('globalprotect-open');
+        const toggle = document.getElementById('globalprotect-toggle');
+        const button = toggle.getBoundingClientRect();
+        const track = toggle.querySelector('.network-vpn__track').getBoundingClientRect();
+        return { openPadding: getComputedStyle(open).padding, switchPadding: getComputedStyle(toggle).padding,
+          dx: (button.left + button.width / 2) - (track.left + track.width / 2),
+          dy: (button.top + button.height / 2) - (track.top + track.height / 2) };
+      })()`);
+      assert.equal(geometry.openPadding, '0px');
+      assert.equal(geometry.switchPadding, '6px');
+      assert(Math.abs(geometry.dx) < 0.1 && Math.abs(geometry.dy) < 0.1, JSON.stringify(geometry));
+      for (const id of ['globalprotect-open', 'globalprotect-toggle']) {
+        const point = await evaluate(`(() => { const rect = document.getElementById('${id}').getBoundingClientRect();
+          return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }; })()`);
+        await client.call('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point });
+        const style = await evaluate(`(() => { const node = document.getElementById('${id}'); const css = getComputedStyle(node);
+          return { hovered: node.matches(':hover'), background: css.backgroundColor, shadow: css.boxShadow,
+            border: css.borderTopColor, otherHovered: document.getElementById('${id === 'globalprotect-open' ? 'globalprotect-toggle' : 'globalprotect-open'}').matches(':hover') }; })()`);
+        assert.equal(style.hovered, true);
+        assert.equal(style.otherHovered, false);
+        if (id === 'globalprotect-toggle') {
+          assert.equal(style.background, 'rgba(0, 0, 0, 0)');
+          assert.match(style.shadow, /inset/);
+        } else {
+          assert.notEqual(style.background, 'rgba(0, 0, 0, 0)');
+          assert.notEqual(style.border, 'rgba(0, 0, 0, 0)');
+        }
+        if (process.env.NETWORK_SCREENSHOT_PATH) {
+          const height = await evaluate('window.__popupHeights.at(-1)');
+          const screenshot = await client.call('Page.captureScreenshot', {
+            format: 'png', clip: { x: 0, y: 0, width: popupSizes.network.width, height, scale: 1 },
+          });
+          await writeFile(process.env.NETWORK_SCREENSHOT_PATH.replace(/\.png$/, '-' + id + '-hover.png'), Buffer.from(screenshot.data, 'base64'));
+        }
+      }
+      await client.call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 0, y: 0 });
+    });
     await t.test('GlobalProtect keeps controls mounted, waits for MFA, and confirms state independently of the route', async () => {
       await load('network');
       await evaluate('window.__refreshGlobalProtect()');
-      assert.equal(await evaluate("document.getElementById('globalprotect-toggle').textContent"), 'Connect');
+      assert.equal(await evaluate("document.getElementById('globalprotect-toggle').getAttribute('aria-label')"), 'Connect GlobalProtect');
+      assert.equal(await evaluate("document.getElementById('globalprotect-toggle').getAttribute('aria-checked')"), 'false');
       await evaluate("document.getElementById('globalprotect-toggle').click()");
       await pause(30);
       assert.equal(await evaluate("document.querySelector('.network-vpn [role=status]').textContent"), 'Connecting…');
@@ -674,14 +736,16 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       await evaluate(`window.__test.globalprotect = { available: true, connected: true };
         window.__test.data.network.defaultInterface = window.__test.data.network.interfaces[0];
         window.__test.notify(); window.__refreshGlobalProtect()`);
-      assert.equal(await evaluate("document.getElementById('globalprotect-toggle').textContent"), 'Disconnect');
+      assert.equal(await evaluate("document.getElementById('globalprotect-toggle').getAttribute('aria-label')"), 'Disconnect GlobalProtect');
+      assert.equal(await evaluate("document.getElementById('globalprotect-toggle').getAttribute('aria-checked')"), 'true');
+      assert(await evaluate("document.querySelector('.network-vpn .note').hidden"));
       assert.equal(await evaluate('window.__test.retained'), false);
       await evaluate("document.getElementById('globalprotect-toggle').click()");
       await pause(30);
       assert.equal(await evaluate("document.querySelector('.network-vpn [role=status]').textContent"), 'Disconnecting…');
       assert(await evaluate('window.__test.retained'));
       await evaluate('window.__test.globalprotect.connected = false; window.__refreshGlobalProtect()');
-      assert.equal(await evaluate("document.getElementById('globalprotect-toggle').textContent"), 'Connect');
+      assert.equal(await evaluate("document.getElementById('globalprotect-toggle').getAttribute('aria-label')"), 'Connect GlobalProtect');
       await evaluate('window.__test.failGlobalProtect = true; document.getElementById("globalprotect-toggle").click()');
       await pause(30);
       assert.match(await evaluate("document.getElementById('popup-error').textContent"), /button unavailable/);
@@ -694,11 +758,11 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       await evaluate('window.__test.globalprotect.available = false; window.__refreshGlobalProtect()');
       assert(await evaluate("document.getElementById('globalprotect-toggle').disabled"));
     });
-    await t.test('network shows existing VPN heuristic and treats device text as text', async () => {
+    await t.test('network keeps diagnostic data collapsed and treats device text as text', async () => {
       await load('network');
       const text = await evaluate("document.getElementById('system-content').textContent");
       assert(await evaluate('document.body.scrollHeight <= innerHeight'));
-      for (const value of ['Wi-Fi', 'Wireless', '192.168.1.2/24', 'fe80::1234', '172.16.0.2', 'GlobalProtect', 'split tunnels', '<script>bad</script>']) {
+      for (const value of ['WI-FI CONNECTION', 'Wireless', '192.168.1.2', 'fe80::1234', '172.16.0.2', 'GlobalProtect', '<script>bad</script>']) {
         assert(text.includes(value), value);
       }
       assert.equal(await evaluate("document.querySelector('#system-content script') !== null"), false);
