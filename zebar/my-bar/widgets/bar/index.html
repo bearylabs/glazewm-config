@@ -133,9 +133,9 @@
       .status--network[data-link='ethernet'] .net__ethernet,
       .status--network[data-link='none'] .net__none { display: block; }
       .status--network.is-vpn { color: var(--ctp-mauve); }
-      .status--network[data-link='none'], .status--power[data-state='low'] { color: var(--ctp-red); }
+      .status--network[data-link='none'] { color: var(--ctp-red); }
       .status--power { color: var(--ctp-subtext0); }
-      .status--power[data-state='ac'], .status--power[data-state='full'] { color: #a6da95; }
+      .status--power[data-state='critical'] { color: var(--ctp-red); }
       .status--power .battery__bolt, .status--power .battery__unknown { display: none; }
       .status--power[data-state='ac'] .battery__bolt { display: block; }
       .status--power[data-state='unknown'] .battery__unknown { display: block; }

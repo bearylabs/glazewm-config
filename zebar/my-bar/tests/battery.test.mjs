@@ -3,7 +3,7 @@ import test from 'node:test';
 import { batteryIndicator } from '../widgets/shared/battery-model.mjs';
 
 test('battery levels use actual charge and AC wins even when not charging', () => {
-  for (const [charge, state] of [[0, 'low'], [0.2, 'low'], [0.21, 'mid'], [0.79, 'mid'], [0.8, 'full'], [1, 'full']]) {
+  for (const [charge, state] of [[0, 'critical'], [0.09, 'critical'], [0.1, 'low'], [0.2, 'low'], [0.21, 'mid'], [0.79, 'mid'], [0.8, 'full'], [1, 'full']]) {
     assert.equal(batteryIndicator({ ac: 'Offline', charge, battery: 'High' }).state, state);
     assert.equal(batteryIndicator({ ac: 'Online', charge, battery: 'High' }).state, 'ac');
   }
