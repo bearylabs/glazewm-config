@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import { powerStatusArgs } from '../widgets/shared/battery-model.mjs';
 import { outputDeviceArgsRegex } from '../widgets/shared/audio-model.mjs';
 import { bluetoothArgsRegex, bluetoothSettingsPermission } from '../widgets/shared/bluetooth-model.mjs';
+import { globalProtectArgsRegex } from '../widgets/shared/globalprotect-model.mjs';
 import { calendarDays, dateKey, popupPlacement, popupSizes, shiftMonth } from '../widgets/shared/popup-model.mjs';
 import { attachPopupSizing } from '../widgets/shared/popup-sizing.mjs';
 import { outsideClickArgs, outsideClickArgsRegex, createOutsideClickWatcher, spawnOutsideClickProcess } from '../widgets/shared/popup-dismissal.mjs';
@@ -42,7 +43,10 @@ test('popup owns narrowly scoped power privileges without changing bar docking',
     program: 'powershell.exe', argsRegex: bluetoothArgsRegex(),
   });
   assert.deepEqual(popup.privileges.shellCommands[4], bluetoothSettingsPermission);
-  assert.equal(popup.privileges.shellCommands.length, 5);
+  assert.deepEqual(popup.privileges.shellCommands[5], {
+    program: 'powershell.exe', argsRegex: globalProtectArgsRegex(),
+  });
+  assert.equal(popup.privileges.shellCommands.length, 6);
   assert.equal(bar.presets[0].height, '28px');
   assert.equal(bar.presets[0].dockToEdge.enabled, true);
   assert.deepEqual(bar.presets[0].monitorSelection, { type: 'all' });
@@ -286,6 +290,7 @@ async function harness({ startError = null, locksAvailable = true } = {}) {
       hovered: type => findTrigger(type).classList.contains('is-hovered'),
       expanded: type => findTrigger(type).attributes['aria-expanded'],
       dismiss: controller.dismissPopup,
+      retain: controller.retainPopupDuringInteraction,
     };
   }
   return {
@@ -411,10 +416,10 @@ test('trigger hover clears on activation and focus loss without a pointerleave',
   assert.deepEqual(env.errors, []);
 });
 
-async function popupHarness(initiallyFocused = false) {
+async function popupHarness(initiallyFocused = false, type = 'calendar') {
   const request = {
     requestId: 'request-1', ownerId: 'bar-1', packId: 'my-bar',
-    type: 'calendar', phase: 'opening',
+    type, phase: 'opening',
     layout: {
       monitor: monitor(-2560, -200, 2560, 1440, 1.5),
       monitors: [monitor(-2560, -200, 2560, 1440, 1.5)],
@@ -492,6 +497,8 @@ async function popupHarness(initiallyFocused = false) {
   await controller.initialisePopup(() => {}, error => errors.push(error));
   return {
     errors, messages, sizes, positions, lifecycle,
+    retain: controller.retainPopupDuringInteraction,
+    dismiss: () => controller.dismissPopup('request-1'),
     get closed() { return closed; },
     async focus(value) {
       focused = value;
@@ -506,6 +513,67 @@ async function popupHarness(initiallyFocused = false) {
     },
   };
 }
+
+test('network client/MFA focus loss retains the popup until the operation ends', async () => {
+  const popup = await popupHarness(true, 'network');
+  const release = popup.retain();
+  await popup.focus(false);
+  await popup.webviewBlur();
+  assert.equal(popup.closed, false);
+  release();
+  await popup.focus(true);
+  await popup.focus(false);
+  assert.equal(popup.closed, true);
+  assert.deepEqual(popup.errors, []);
+});
+
+test('explicit dismissal bypasses retention and expired retention cannot trap the popup', async () => {
+  const explicit = await popupHarness(true, 'network');
+  explicit.retain();
+  await explicit.dismiss();
+  assert.equal(explicit.closed, true);
+  const expired = await popupHarness(true, 'network');
+  expired.retain(-1);
+  await expired.focus(false);
+  assert.equal(expired.closed, true);
+});
+
+test('retained MFA outside clicks rearm native detection; normal outside dismissal resumes afterward', async () => {
+  const env = await harness();
+  const bar = await env.bar('bar-1');
+  bar.click('network');
+  await env.settle();
+  const release = bar.retain();
+  bar.outsideClick();
+  await env.settle();
+  assert.equal(env.nativeWindows.length, 1);
+  bar.outsideClick();
+  await env.settle();
+  assert.equal(env.nativeWindows.length, 1);
+  assert.equal(env.helperStartCount, 1);
+  release();
+  bar.outsideClick();
+  await env.settle();
+  assert.equal(env.nativeWindows.length, 0);
+  assert.deepEqual(env.errors, []);
+});
+
+test('retention releases only its original request and never suppresses other popup types', async () => {
+  const env = await harness();
+  const bar = await env.bar('bar-1');
+  bar.click('network');
+  await env.settle();
+  const releaseOld = bar.retain();
+  bar.click('audio');
+  await env.settle();
+  releaseOld();
+  assert.equal(env.state().type, 'audio');
+  bar.retain();
+  bar.outsideClick();
+  await env.settle();
+  assert.equal(env.nativeWindows.length, 0);
+  assert.deepEqual(env.errors, []);
+});
 
 test('initially unfocused popup ignores startup blur and closes only after real focus loss', async () => {
   const popup = await popupHarness();

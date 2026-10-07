@@ -77,6 +77,13 @@ const mocks = `
       notify();
       return { code: 0 };
     }
+    if (program === 'powershell.exe' && args[3]?.includes('GlobalProtectButton')) {
+      const action = args[3].match(/\\$action = '([^']+)'/)[1];
+      calls.push(['globalprotect', action]);
+      if (window.__test.failGlobalProtect) return { code: 1, stderr: 'GlobalProtect button unavailable' };
+      if (action !== 'status') return { code: 0, stdout: JSON.stringify({ requested: action }) };
+      return { code: 0, stdout: JSON.stringify(window.__test.globalprotect ?? { available: true, connected: false }) };
+    }
     if (program === 'powershell.exe' && args[3]?.includes('class BluetoothMenu')) {
       calls.push(['bluetooth', program, args]);
       if (window.__test.holdBluetoothScan && args[3].includes('::Read($true)')) {
@@ -111,6 +118,10 @@ const mocks = `
 
 const controllerMock = `
   import { attachPopupSizing } from './popup-sizing.mjs';
+  export function retainPopupDuringInteraction() {
+    window.__test.retained = true;
+    return () => { window.__test.retained = false; };
+  }
   export async function initialisePopup(render, reportError) {
     try {
       const maxHeight = innerHeight;
@@ -183,6 +194,9 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       if (url.pathname === '/widgets/bar/index.html') {
         source = source.replace('const powerTimer = setInterval(refreshPower, 10000);',
           'window.__refreshPower = refreshPower; const powerTimer = setInterval(refreshPower, 10000);');
+      }
+      if (url.pathname === '/widgets/popup/globalprotect.mjs') {
+        source = source.replace('const interval = setInterval', 'window.__refreshGlobalProtect = refresh; const interval = setInterval');
       }
       if (url.pathname === '/widgets/popup/bluetooth.mjs') {
         source = source.replace('const statusTimer = setInterval', 'window.__refreshBluetoothStatus = () => run("status"); const statusTimer = setInterval');
@@ -607,9 +621,9 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert.match(result.font, /JetBrainsMono/);
       assert.equal(result.padding, '14px');
       assert.equal(result.radius, '0px');
-      assert.deepEqual(result.sections, ['Connection', 'Addresses', 'Company VPN']);
+      assert.deepEqual(result.sections, ['Connection', 'Addresses', 'Company VPN', 'GlobalProtect']);
       assert.equal(result.flat, true);
-      assert.equal(result.controls, 0);
+      assert.equal(result.controls, 2);
       assert.equal(result.vpn, 'VPN active');
       assert.equal(result.fits, true);
       if (process.env.NETWORK_SCREENSHOT_PATH) {
@@ -627,8 +641,8 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       }; window.__test.notify()`);
       assert.equal(await evaluate("document.getElementById('network-title').textContent"), 'Ethernet (2.5 Gb/s)');
       assert.equal(await evaluate("document.querySelector('.hero__meta').textContent"), 'ETHERNET CONNECTION');
-      assert.equal(await evaluate("document.querySelectorAll('.network-section').length"), 2);
-      assert.match(await evaluate("document.getElementById('system-content').textContent"), /Direct connection/);
+      assert.equal(await evaluate("document.querySelectorAll('.network-section').length"), 3);
+      assert.match(await evaluate("document.getElementById('system-content').textContent"), /Physical default route/);
       await evaluate(`window.__test.data.network = { defaultInterface: null, interfaces: [] }; window.__test.notify()`);
       assert.equal(await evaluate("document.getElementById('network-title').textContent"), 'No physical connection');
       assert.equal(await evaluate("document.querySelector('.hero__meta').textContent"), 'NOT CONNECTED');
@@ -647,11 +661,44 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert(overflow.body <= overflow.height && overflow.scroll > 0 && overflow.width <= overflow.clientWidth,
         JSON.stringify(overflow));
     });
+    await t.test('GlobalProtect keeps controls mounted, waits for MFA, and confirms state independently of the route', async () => {
+      await load('network');
+      await evaluate('window.__refreshGlobalProtect()');
+      assert.equal(await evaluate("document.getElementById('globalprotect-toggle').textContent"), 'Connect');
+      await evaluate("document.getElementById('globalprotect-toggle').click()");
+      await pause(30);
+      assert.equal(await evaluate("document.querySelector('.network-vpn [role=status]').textContent"), 'Connecting…');
+      assert(await evaluate("document.getElementById('globalprotect-toggle').disabled"));
+      assert(await evaluate('window.__test.retained'));
+      assert.match(await evaluate("document.querySelector('.network-vpn .note').textContent"), /MFA/);
+      await evaluate(`window.__test.globalprotect = { available: true, connected: true };
+        window.__test.data.network.defaultInterface = window.__test.data.network.interfaces[0];
+        window.__test.notify(); window.__refreshGlobalProtect()`);
+      assert.equal(await evaluate("document.getElementById('globalprotect-toggle').textContent"), 'Disconnect');
+      assert.equal(await evaluate('window.__test.retained'), false);
+      await evaluate("document.getElementById('globalprotect-toggle').click()");
+      await pause(30);
+      assert.equal(await evaluate("document.querySelector('.network-vpn [role=status]').textContent"), 'Disconnecting…');
+      assert(await evaluate('window.__test.retained'));
+      await evaluate('window.__test.globalprotect.connected = false; window.__refreshGlobalProtect()');
+      assert.equal(await evaluate("document.getElementById('globalprotect-toggle').textContent"), 'Connect');
+      await evaluate('window.__test.failGlobalProtect = true; document.getElementById("globalprotect-toggle").click()');
+      await pause(30);
+      assert.match(await evaluate("document.getElementById('popup-error').textContent"), /button unavailable/);
+      assert(await evaluate("document.getElementById('globalprotect-toggle').disabled"));
+      await evaluate('window.__test.failGlobalProtect = false; window.__refreshGlobalProtect()');
+      await evaluate("document.getElementById('globalprotect-open').click()");
+      await pause(30);
+      assert.deepEqual(await evaluate("window.__test.calls.filter(c => c[0] === 'globalprotect' && c[1] !== 'status')"),
+        [['globalprotect', 'connect'], ['globalprotect', 'disconnect'], ['globalprotect', 'connect'], ['globalprotect', 'open']]);
+      await evaluate('window.__test.globalprotect.available = false; window.__refreshGlobalProtect()');
+      assert(await evaluate("document.getElementById('globalprotect-toggle').disabled"));
+    });
     await t.test('network shows existing VPN heuristic and treats device text as text', async () => {
       await load('network');
       const text = await evaluate("document.getElementById('system-content').textContent");
       assert(await evaluate('document.body.scrollHeight <= innerHeight'));
-      for (const value of ['Wi-Fi', 'Wireless', '192.168.1.2/24', 'fe80::1234', '172.16.0.2', 'GlobalProtect', 'Split tunnels', '<script>bad</script>']) {
+      for (const value of ['Wi-Fi', 'Wireless', '192.168.1.2/24', 'fe80::1234', '172.16.0.2', 'GlobalProtect', 'split tunnels', '<script>bad</script>']) {
         assert(text.includes(value), value);
       }
       assert.equal(await evaluate("document.querySelector('#system-content script') !== null"), false);

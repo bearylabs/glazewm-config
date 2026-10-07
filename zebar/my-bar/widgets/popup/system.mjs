@@ -6,6 +6,7 @@ import { createBatteryIcon, createIcon } from '../shared/icons.mjs';
 import { diskUsage, executePowerAction, gib, percent, powerCommands } from '../shared/system-model.mjs';
 
 import { renderBluetooth } from './bluetooth.mjs';
+import { renderGlobalProtect } from './globalprotect.mjs';
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -221,7 +222,10 @@ function renderAudio(root, reportError) {
   });
 }
 
-function renderNetwork(root) {
+function renderNetwork(root, reportError) {
+  const connection = element('div');
+  root.append(connection);
+  renderGlobalProtect(root, reportError);
   function heading(icon, title, meta) {
     const node = hero(icon, title, meta);
     node.classList.add('network-hero');
@@ -241,7 +245,7 @@ function renderNetwork(root) {
   subscribe({ network: { type: 'network', refreshInterval: 5000 } }, (output, errors) => {
     const net = output.network;
     if (!net) {
-      root.replaceChildren(heading('wifi-off', 'No connection', 'NETWORK DATA UNAVAILABLE'), unavailable('Network', errors.network));
+      connection.replaceChildren(heading('wifi-off', 'No connection', 'NETWORK DATA UNAVAILABLE'), unavailable('Network', errors.network));
       return;
     }
     const { tunnel, iface, link } = networkConnection(net);
@@ -271,12 +275,12 @@ function renderNetwork(root) {
         ['IPv6', tunnel.ipv6Addresses?.join('\n') || 'Unavailable'],
       ], 'VPN active'));
     } else {
-      const state = element('p', 'Direct connection', 'note network-direct');
+      const state = element('p', 'Physical default route', 'note network-direct');
       nodes.push(state);
     }
     if (errors.network) nodes.push(unavailable('Network', errors.network));
-    nodes.push(element('p', 'VPN uses the default-route heuristic. Split tunnels may be missed; this is not an internet reachability check.', 'note network-note'));
-    root.replaceChildren(...nodes);
+    nodes.push(element('p', 'Route details use the default route; GlobalProtect status below also detects split tunnels. This is not an internet reachability check.', 'note network-note'));
+    connection.replaceChildren(...nodes);
   });
 }
 

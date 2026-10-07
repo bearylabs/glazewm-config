@@ -59,10 +59,27 @@ async function closeWindows(windows) {
   }
 }
 
-export async function dismissPopup(requestId) {
+// Native client/MFA interactions temporarily retain this exact popup request.
+// The deadline bounds retention even if the WebView or operation fails.
+export function retainPopupDuringInteraction(duration = 150000) {
+  const state = readState();
+  if (!state || state.type !== 'network') return () => {};
+  const requestId = state.requestId;
+  const deadline = Date.now() + duration;
+  writeState({ ...state, retainDismissalUntil: deadline });
+  return () => {
+    const current = readState();
+    if (current?.requestId !== requestId || current.retainDismissalUntil !== deadline) return;
+    const { retainDismissalUntil, ...rest } = current;
+    writeState(rest);
+  };
+}
+
+export async function dismissPopup(requestId, automatic = false) {
   return exclusive(async () => {
     const state = readState();
     if (requestId && state?.requestId !== requestId) return;
+    if (automatic && state?.type === 'network' && state.retainDismissalUntil > Date.now()) return false;
     const windows = await popupWindows();
     // Publish the closed state before closing our own WebView: code after the
     // native close may never run, leaving the bar's expanded state stuck.
@@ -146,7 +163,14 @@ export function attachPopupTriggers(triggers, reportError, clearError) {
   if (!mouseWatcher) {
     mouseWatcher = createOutsideClickWatcher(
       (program, args) => spawnOutsideClickProcess(zebar.shellSpawn, invoke, program, args),
-      dismissPopup, reportError,
+      async requestId => {
+        const dismissed = await dismissPopup(requestId, true);
+        // The native watcher is one-shot. A client/MFA click consumes its arm
+        // even when we retain the popup, so rearm the still-current request.
+        if (dismissed === false && readState()?.requestId === requestId) {
+          await mouseWatcher.arm(requestId);
+        }
+      }, reportError,
     );
     void mouseWatcher.prewarm().catch(reportError);
     window.addEventListener('pagehide', () => mouseWatcher.stop(), { once: true });
@@ -244,11 +268,11 @@ export async function initialisePopup(render, reportError) {
   let closing = false;
   let hasFocused = false;
   let stopSizing = () => {};
-  async function close() {
+  async function close(automatic = false) {
     if (closing) return;
     closing = true;
     try {
-      await dismissPopup(request.requestId);
+      if (await dismissPopup(request.requestId, automatic) === false) closing = false;
     } catch (error) {
       closing = false;
       reportError(error);
@@ -263,7 +287,7 @@ export async function initialisePopup(render, reportError) {
     try {
       if (await widget.tauriWindow.isFocused()) return;
       // A bar click performs its own atomic toggle/close; do not race it.
-      if (!await focusedBar()) await close();
+      if (!await focusedBar()) await close(true);
     } catch (error) {
       reportError(error);
     }
