@@ -432,10 +432,41 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
         tabs: document.querySelectorAll('#calendar-days button[tabindex="0"]').length,
         fits: document.body.scrollHeight <= innerHeight,
       })`), { days: 42, tabs: 1, fits: true });
+      assert.deepEqual(await evaluate(`({
+        square: getComputedStyle(document.body).borderRadius,
+        border: getComputedStyle(document.body).borderTopWidth,
+        weeks: document.querySelectorAll('#calendar-days .calendar-week').length,
+        hero: Boolean(document.querySelector('#calendar-icon svg')) && document.getElementById('hero-date').textContent.length > 0,
+        bottomNav: document.querySelector('header').getBoundingClientRect().top >= document.querySelector('table').getBoundingClientRect().bottom,
+      })`), { square: '0px', border: '2px', weeks: 6, hero: true, bottomNav: true });
+      const hero = await evaluate("document.getElementById('hero-date').textContent");
+      const progress = await evaluate("document.getElementById('year-percent').textContent");
       const previous = await evaluate('document.activeElement.dataset.date');
       await client.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'PageDown', code: 'PageDown' });
       const next = await evaluate('document.activeElement.dataset.date');
       assert.notEqual(next, previous);
+      assert.equal(await evaluate("document.getElementById('hero-date').textContent"), hero);
+      assert.equal(await evaluate("document.getElementById('year-percent').textContent"), progress);
+      await evaluate("document.getElementById('today').click()");
+      assert.equal(await evaluate('document.activeElement.dataset.date'), previous);
+      for (const [width, height] of [[560, 440], [328, 300], [280, 240]]) {
+        await load('calendar', width, height);
+        assert.deepEqual(await evaluate(`(() => {
+          const content = document.getElementById('calendar-content');
+          const bounds = document.querySelector('main').getBoundingClientRect();
+          const days = [...document.querySelectorAll('#calendar-days button')];
+          const controls = ['today', 'previous-month', 'next-month'].map(id => document.getElementById(id));
+          return {
+            noScroll: content.scrollHeight <= content.clientHeight && content.scrollWidth <= content.clientWidth,
+            fullyVisible: [...days, ...controls].every(node => {
+              const rect = node.getBoundingClientRect();
+              return rect.top >= 0 && rect.bottom <= innerHeight && rect.left >= 0 && rect.right <= innerWidth;
+            }),
+            fits: bounds.bottom <= innerHeight && bounds.right <= innerWidth,
+            days: days.length,
+          };
+        })()`), { noScroll: true, fullyVisible: true, fits: true, days: 42 });
+      }
     });
     await t.test('audio slider and mute send provider commands and reflect external updates', async () => {
       await load('audio');

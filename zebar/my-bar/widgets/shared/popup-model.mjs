@@ -62,13 +62,27 @@ export function calendarDays(year, month) {
   );
 }
 
+export function isoWeek(date) {
+  const thursday = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  thursday.setUTCDate(thursday.getUTCDate() + 4 - (thursday.getUTCDay() || 7));
+  const yearStart = Date.UTC(thursday.getUTCFullYear(), 0, 1);
+  return Math.ceil(((thursday.getTime() - yearStart) / 86400000 + 1) / 7);
+}
+
+export function yearProgress(date) {
+  const year = date.getFullYear();
+  const start = Date.UTC(year, 0, 1);
+  const elapsed = Date.UTC(year, date.getMonth(), date.getDate()) - start;
+  return elapsed / (Date.UTC(year + 1, 0, 1) - start);
+}
+
 export function shiftMonth(date, delta) {
   const first = new Date(date.getFullYear(), date.getMonth() + delta, 1, 12);
   const lastDay = new Date(first.getFullYear(), first.getMonth() + 1, 0, 12).getDate();
   return new Date(first.getFullYear(), first.getMonth(), Math.min(date.getDate(), lastDay), 12);
 }
 export const popupSizes = Object.freeze({
-  calendar: { width: 328, height: 376 },
+  calendar: { width: 560, height: 440 },
   audio: { width: 380, height: 480 },
   network: { width: 380, height: 540 },
   bluetooth: { width: 380, height: 580 },

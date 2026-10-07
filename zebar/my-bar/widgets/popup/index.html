@@ -67,9 +67,51 @@
       td button[data-outside='true'] { color: var(--overlay); }
       td button[aria-current='date'] { box-shadow: inset 0 0 0 1px var(--accent); }
       td[aria-selected='true'] button { background: var(--surface); color: var(--accent); }
-      footer { margin-top: 7px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-      #selected-date { color: var(--muted); font-size: 11px; }
-      #today { border-radius: 7px; background: var(--surface); padding: 6px 10px; }
+      /* Omarchy clock panel: today hero, year rail, ISO-week gutter, bottom navigation. */
+      html[data-popup-type='calendar'] body {
+        border-width: 2px;
+        border-radius: 0;
+        font: 12px "JetBrainsMono Nerd Font", "JetBrains Mono", Consolas, monospace;
+        --calendar-caption: color-mix(in srgb, var(--text) 71.4%, black);
+        --calendar-dim: color-mix(in srgb, var(--text) 45.5%, black);
+      }
+      html[data-popup-type='calendar'][data-popup-ready='true'] body { border-color: var(--accent); }
+      html[data-popup-type='calendar'] main { zoom: var(--calendar-scale, 1); }
+      html[data-popup-type='calendar'] #calendar-content {
+        padding: 18px 18px 0;
+        max-height: none;
+        overflow: visible;
+      }
+      .calendar-hero { display: flex; justify-content: center; margin-bottom: 14px; }
+      #today { display: flex; align-items: center; justify-content: center; gap: 22px; max-width: 100%; padding: 0; border-radius: 0; background: transparent; }
+      #today:hover { color: var(--accent); }
+      #calendar-icon { display: flex; flex: 0 0 auto; }
+      #calendar-icon svg { width: 48px; height: 48px; }
+      #hero-date { font-size: clamp(28px, 9.3vw, 52px); font-weight: 700; letter-spacing: -2px; }
+      .calendar-year-progress { display: flex; align-items: center; gap: 12px; max-width: 424px; margin: 0 auto 26px; font-size: 11px; }
+      #calendar-year { color: var(--calendar-caption); letter-spacing: 1px; }
+      #year-progress { flex: 1; height: 6px; background: color-mix(in srgb, var(--text) 12%, transparent); }
+      #year-progress > span { display: block; height: 100%; background: var(--text); }
+      html[data-popup-type='calendar'] table { max-width: 424px; margin: 0 auto; border-collapse: separate; border-spacing: 2px 3px; }
+      html[data-popup-type='calendar'] th { height: 16px; font-size: 10px; color: var(--calendar-caption); letter-spacing: 1px; }
+      html[data-popup-type='calendar'] .calendar-week { width: 46px; padding-right: 14px; color: color-mix(in srgb, var(--text) 52.6%, black); font-weight: 400; }
+      html[data-popup-type='calendar'] thead .calendar-week { font-weight: 700; }
+      html[data-popup-type='calendar'] tbody .calendar-week { border-right: 1px solid color-mix(in srgb, var(--text) 10%, transparent); }
+      html[data-popup-type='calendar'] td { padding: 0; }
+      html[data-popup-type='calendar'] td button { height: 34px; border-radius: 0; color: var(--text); }
+      html[data-popup-type='calendar'] td button[data-weekend='true'] { color: var(--calendar-caption); }
+      html[data-popup-type='calendar'] td button[data-outside='true'] { color: var(--calendar-dim); }
+      html[data-popup-type='calendar'] td[aria-selected='true'] button { background: transparent; }
+      html[data-popup-type='calendar'] td button[aria-current='date'] { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 40%, transparent); font-weight: 700; }
+      html[data-popup-type='calendar'] td button:hover { background: color-mix(in srgb, var(--text) 8%, transparent); }
+      html[data-popup-type='calendar'] td button:focus-visible { outline: 1px solid color-mix(in srgb, var(--text) 25%, transparent); background: color-mix(in srgb, var(--text) 8%, transparent); }
+      html[data-popup-type='calendar'] header {
+        order: 2; flex: 0 0 auto; width: calc(100% - 36px); max-width: 424px; height: 32px;
+        margin: 8px auto 18px; padding: 0; grid-template-columns: 32px minmax(0, 1fr) 32px;
+      }
+      html[data-popup-type='calendar'] h1 { text-align: center; color: var(--calendar-caption); font-size: 12px; font-weight: 400; letter-spacing: 1px; text-transform: uppercase; }
+      html[data-popup-type='calendar'] header button { border-radius: 0; }
+      html[data-popup-type='calendar'] #close-popup { display: none; }
       #popup-error {
         position: absolute;
         z-index: 10;
@@ -304,14 +346,20 @@
         <button id="close-popup" type="button" aria-label="Close popup">×</button>
       </header>
       <div id="calendar-content">
+        <div class="calendar-hero">
+          <button id="today" type="button" aria-label="Back to today" title="Back to today">
+            <span id="calendar-icon"></span><span id="hero-date"></span>
+          </button>
+        </div>
+        <div class="calendar-year-progress">
+          <span id="calendar-year"></span>
+          <div id="year-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100"><span></span></div>
+          <span id="year-percent"></span>
+        </div>
         <table role="grid" aria-labelledby="month-label">
           <thead><tr id="weekdays"></tr></thead>
           <tbody id="calendar-days"></tbody>
         </table>
-        <footer>
-          <span id="selected-date"></span>
-          <button id="today" type="button">Today</button>
-        </footer>
       </div>
       <section class="panel" id="system-content" hidden></section>
     </main>
@@ -331,6 +379,7 @@
         import('./system.mjs'),
       ]).then(([{ initialisePopup }, { renderCalendar }, { renderSystemPopup }]) =>
         initialisePopup(type => {
+          document.documentElement.dataset.popupType = type;
           const calendar = type === 'calendar';
           document.getElementById('calendar-content').hidden = !calendar;
           document.getElementById('system-content').hidden = calendar;
