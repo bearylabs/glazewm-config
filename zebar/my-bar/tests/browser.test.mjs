@@ -60,7 +60,7 @@ const mocks = `
     notify();
   };
   export function createProviderGroup(config) {
-    const select = source => Object.fromEntries(Object.keys(config).map(key => [key, source[key] ?? null]));
+    const select = source => Object.fromEntries(Object.keys(config).map(key => [key, window.__holdNetwork && source === data && key === 'network' ? null : source[key] ?? null]));
     return {
       get outputMap() { return select(data); },
       get errorMap() { return select(errors); },
@@ -70,6 +70,9 @@ const mocks = `
     };
   }
   export async function shellExec(program, args) {
+    if (window.__holdNetwork && program === 'powershell.exe' && /GlobalProtectButton|GetRadiosAsync|GetIPv4Statistics/.test(args[3] ?? '')) {
+      while (window.__holdNetwork) await new Promise(resolve => setTimeout(resolve, 20));
+    }
     if (program === 'powershell.exe' && args[3]?.includes('[AudioOutput]::Select')) {
       calls.push(['output-device', program, args]);
       if (window.__test.failDeviceSwitch) return { code: 1, stderr: 'Device switch failed' };
@@ -83,6 +86,16 @@ const mocks = `
       if (window.__test.failGlobalProtect) return { code: 1, stderr: 'GlobalProtect button unavailable' };
       if (action !== 'status') return { code: 0, stdout: JSON.stringify({ requested: action }) };
       return { code: 0, stdout: JSON.stringify(window.__test.globalprotect ?? { available: true, connected: false }) };
+    }
+    if (program === 'powershell.exe' && args[3]?.includes('Windows.Devices.Radios.Radio]::GetRadiosAsync')) {
+      const action = args[3].match(/\\$action = '([^']+)'/)[1];
+      calls.push(['wifi-radio', action]);
+      if (window.__test.failWifiRadio) return { code: 1, stderr: 'Windows denied Wi-Fi radio access' };
+      if (action !== 'status') window.__test.wifiEnabled = action === 'on';
+      return { code: 0, stdout: JSON.stringify({ available: true, enabled: window.__test.wifiEnabled ?? true }) };
+    }
+    if (program === 'powershell.exe' && args[3]?.includes('$nic.GetIPv4Statistics()')) {
+      return { code: 0, stdout: JSON.stringify({ id: 'wifi', received: 1410000000, sent: 353000000, gateway: '192.168.1.1', ping: 31 }) };
     }
     if (program === 'powershell.exe' && args[3]?.includes('class BluetoothMenu')) {
       calls.push(['bluetooth', program, args]);
@@ -272,7 +285,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert.deepEqual(result.workspaces, ['One', '2']);
       assert.equal(result.modes, 'pauseresize');
       assert.equal(result.bg, 'rgb(36, 39, 58)');
-      assert.deepEqual(result.calls, [['wm', 'focus --workspace 2']]);
+      assert.deepEqual(result.calls.filter(call => call[0] === 'wm'), [['wm', 'focus --workspace 2']]);
       assert.equal(result.oldStats, false);
     });
     await t.test('bar uses consistent filled icons and keeps status variants', async () => {
@@ -289,6 +302,27 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       await evaluate('window.__test.data.network = null; window.__test.notify()');
       assert(await evaluate(`getComputedStyle(document.querySelector('.net__none')).display !== 'none' &&
         getComputedStyle(document.querySelector('.net__wifi')).display === 'none'`));
+    });
+    await t.test('unchanged provider updates leave tooltip titles and clock nodes untouched', async () => {
+      await load('bar');
+      const result = await evaluate(`(async () => {
+        const changes = [];
+        const observer = new MutationObserver(records => {
+          changes.push(...records.filter(record =>
+            record.attributeName === 'title' || record.target.id === 'time')
+            .map(record => record.target.id));
+        });
+        observer.observe(document.body, { subtree: true, attributes: true, childList: true });
+        window.__test.notify();
+        window.__test.notify();
+        await window.__refreshPower();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        observer.disconnect();
+        return changes;
+      })()`);
+      assert.deepEqual(result, [], 'Repeated status snapshots must not reset active WebView tooltips.');
+      await evaluate(`window.__test.data.audio.defaultPlaybackDevice.volume = 43; window.__test.notify()`);
+      assert.match(await evaluate("document.getElementById('audio-trigger').title"), /43%/);
     });
     await t.test('battery icon shows AC, low, mid, full and unavailable status', async () => {
       await load('bar');
@@ -615,7 +649,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
         };
       })()`);
       assert.equal(result.headerHidden, true);
-      assert.equal(result.title, '<script>bad</script> (75%)');
+      assert.equal(result.title, '<script>bad</script>');
       assert.equal(result.meta, 'WI-FI CONNECTION');
       assert.equal(result.labelledBy, 'network-title');
       assert.match(result.font, /JetBrainsMono/);
@@ -623,15 +657,15 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert.equal(result.radius, '0px');
       assert.deepEqual(result.sections, ['VPN']);
       assert.equal(result.flat, true);
-      assert.equal(result.controls, 2);
+      assert.equal(result.controls, 3);
       assert.equal(result.vpn, 'Disconnected');
       assert.equal(result.fits, true);
-      assert.equal(await evaluate("document.querySelector('.network-diagnostics').open"), false);
+      assert.equal(await evaluate("document.querySelector('.network-diagnostics')"), null);
       assert(await evaluate("document.querySelector('.network-vpn .note').hidden"));
-      assert.equal(await evaluate("document.querySelector('.network-overview dd').textContent"), '192.168.1.2');
+      assert.equal(await evaluate("[...document.querySelectorAll('.network-traffic dt')].find(node => node.textContent === 'IP Address').nextElementSibling.textContent"), '192.168.1.2');
       assert.equal(await evaluate("document.getElementById('globalprotect-toggle').getAttribute('role')"), 'switch');
       assert.equal(await evaluate("document.getElementById('globalprotect-open').getAttribute('aria-label')"), 'Open GlobalProtect client');
-      assert(await evaluate("document.getElementById('system-content').scrollHeight < 260"));
+      assert(await evaluate("document.getElementById('system-content').scrollHeight < 320"));
       if (process.env.NETWORK_SCREENSHOT_PATH) {
         await evaluate(`window.__test.data.network.defaultGateway.ssid = 'Office Wi-Fi'; window.__test.notify()`);
         await pause(50);
@@ -655,30 +689,29 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert.equal(await evaluate("document.getElementById('network-title').textContent"), 'Ethernet (2.5 Gb/s)');
       assert.equal(await evaluate("document.querySelector('.hero__meta').textContent"), 'ETHERNET CONNECTION');
       assert.equal(await evaluate("document.querySelectorAll('.network-section').length"), 1);
-      assert.equal(await evaluate("document.querySelectorAll('.network-overview dt').length"), 1, 'Ethernet speed is already in the hero.');
-      assert.equal(await evaluate("document.querySelector('.network-overview dd').textContent"), '10.0.0.2');
-      assert.equal(await evaluate("document.querySelector('.network-diagnostics').open"), false);
+      assert.equal(await evaluate("document.querySelectorAll('.network-connection .network-overview dt').length"), 1, 'Ethernet speed is already in the hero.');
+      assert.equal(await evaluate("document.querySelector('.network-connection .network-overview dd').textContent"), '10.0.0.2');
+      assert.equal(await evaluate("document.querySelector('.network-diagnostics')"), null);
       await evaluate(`window.__test.data.network = { defaultInterface: null, interfaces: [] }; window.__test.notify()`);
       assert.equal(await evaluate("document.getElementById('network-title').textContent"), 'No physical connection');
       assert.equal(await evaluate("document.querySelector('.hero__meta').textContent"), 'NOT CONNECTED');
-      assert(await evaluate("document.querySelector('.network-diagnostics').hidden"));
-      assert.equal(await evaluate("document.querySelector('.network-overview')"), null);
+      assert.equal(await evaluate("document.querySelector('.network-diagnostics')"), null);
+      assert.equal(await evaluate("document.querySelector('.network-traffic').hidden"), true);
       await evaluate(`window.__test.data.network = { defaultInterface: {
         name: 'Adapter '.repeat(40), type: 'wifi', ipv4Addresses: ['10.0.0.2'],
         ipv6Addresses: Array.from({ length: 40 }, (_, i) => '2001:db8::' + i),
       } }; window.__test.notify()`);
       assert.equal(await evaluate("document.querySelector('.hero__title').textContent.includes('%')"), false);
-      await evaluate("document.querySelector('.network-diagnostics').open = true");
       await pause(30);
       await evaluate('window.__test.notify()');
-      assert(await evaluate("document.querySelector('.network-diagnostics').open"), 'Provider refresh must preserve expanded diagnostics.');
+      assert.equal(await evaluate("document.querySelector('details')"), null);
       const overflow = await evaluate(`(() => {
         const panel = document.getElementById('system-content');
         panel.scrollTop = panel.scrollHeight;
         return { body: document.body.scrollHeight, height: innerHeight, scroll: panel.scrollTop,
           width: panel.scrollWidth, clientWidth: panel.clientWidth };
       })()`);
-      assert(overflow.body <= overflow.height && overflow.scroll > 0 && overflow.width <= overflow.clientWidth,
+      assert(overflow.body <= overflow.height && overflow.width <= overflow.clientWidth,
         JSON.stringify(overflow));
     });
     await t.test('VPN action hover stays aligned with the icon and centered switch track', async () => {
@@ -758,11 +791,47 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       await evaluate('window.__test.globalprotect.available = false; window.__refreshGlobalProtect()');
       assert(await evaluate("document.getElementById('globalprotect-toggle').disabled"));
     });
-    await t.test('network keeps diagnostic data collapsed and treats device text as text', async () => {
+    await t.test('network cache paints immediately while live status queries are pending', async () => {
+      await load('network');
+      await pause(50);
+      const before = await evaluate("document.querySelector('.network-traffic').textContent");
+      await client.call('Page.enable');
+      const injected = await client.call('Page.addScriptToEvaluateOnNewDocument', { source: 'window.__holdNetwork = true;' });
+      try {
+        await load('network');
+        assert.equal(await evaluate("document.querySelector('.network-traffic').textContent"), before);
+        assert.equal(await evaluate("document.getElementById('network-title').textContent"), '<script>bad</script>');
+        assert.equal(await evaluate("document.querySelector('.network-section__state').textContent"), 'Disconnected');
+        assert(await evaluate("document.getElementById('wifi-toggle').disabled && document.getElementById('globalprotect-toggle').disabled"));
+        await evaluate('window.__holdNetwork = false; window.__test.notify()');
+        await pause(100);
+        assert(await evaluate("!document.getElementById('wifi-toggle').disabled && !document.getElementById('globalprotect-toggle').disabled"));
+      } finally {
+        await evaluate('window.__holdNetwork = false');
+        await client.call('Page.removeScriptToEvaluateOnNewDocument', { identifier: injected.identifier });
+      }
+    });
+    await t.test('Wi-Fi header switch controls the native radio and shows denied access', async () => {
+      await load('network');
+      assert.equal(await evaluate("document.getElementById('wifi-toggle').getAttribute('aria-checked')"), 'true');
+      assert(await evaluate("document.querySelector('.network-hero #wifi-toggle') !== null"));
+      await evaluate("document.getElementById('wifi-toggle').click()");
+      await pause(30);
+      assert.equal(await evaluate("document.getElementById('wifi-toggle').getAttribute('aria-checked')"), 'false');
+      await evaluate("document.getElementById('wifi-toggle').click()");
+      await pause(30);
+      assert.equal(await evaluate("document.getElementById('wifi-toggle').getAttribute('aria-checked')"), 'true');
+      await evaluate("window.__test.failWifiRadio = true; document.getElementById('wifi-toggle').click()");
+      await pause(30);
+      assert.equal(await evaluate("document.getElementById('wifi-toggle').getAttribute('aria-checked')"), 'true');
+      assert.match(await evaluate("document.querySelector('.network-note.error').textContent"), /denied/);
+      assert.deepEqual(await evaluate("window.__test.calls.filter(c => c[0] === 'wifi-radio').map(c => c[1])"), ['status', 'status', 'off', 'status', 'on', 'status']);
+    });
+    await t.test('network omits diagnostics and treats device text as text', async () => {
       await load('network');
       const text = await evaluate("document.getElementById('system-content').textContent");
       assert(await evaluate('document.body.scrollHeight <= innerHeight'));
-      for (const value of ['WI-FI CONNECTION', 'Wireless', '192.168.1.2', 'fe80::1234', '172.16.0.2', 'GlobalProtect', '<script>bad</script>']) {
+      for (const value of ['WI-FI CONNECTION', '192.168.1.2', 'GlobalProtect', '<script>bad</script>']) {
         assert(text.includes(value), value);
       }
       assert.equal(await evaluate("document.querySelector('#system-content script') !== null"), false);

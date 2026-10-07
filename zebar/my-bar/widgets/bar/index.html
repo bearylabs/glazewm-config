@@ -199,6 +199,7 @@
       import { networkConnection } from '../shared/network-model.mjs';
       import { batteryIndicator, powerStatusArgs } from '../shared/battery-model.mjs';
       import { createIcon, createBatteryIcon } from '../shared/icons.mjs';
+      import { startNetworkBackground } from '../shared/network-background.mjs';
 
       for (const [id, icons] of Object.entries({
         split: [['split-horizontal', 'split__horizontal'], ['split-vertical', 'split__vertical']],
@@ -211,11 +212,16 @@
       }
       document.getElementById('power-trigger').replaceChildren(createBatteryIcon());
 
+      // Reassigning title, even to the same value, dismisses WebView2 tooltips.
+      // Provider output arrives every second; only publish actual changes.
+      function setTitle(element, title) {
+        if (element.title !== title) element.title = title;
+      }
       const popupErrorEl = document.getElementById('popup-error');
       function reportPopupError(error) {
         console.error('Bar:', error);
         popupErrorEl.textContent = error.message ?? String(error);
-        popupErrorEl.title = `${popupErrorEl.textContent} (click to dismiss)`;
+        setTitle(popupErrorEl, `${popupErrorEl.textContent} (click to dismiss)`);
         popupErrorEl.hidden = false;
       }
       popupErrorEl.addEventListener('click', () => { popupErrorEl.hidden = true; });
@@ -235,6 +241,8 @@
         network: { type: 'network', refreshInterval: 5000 },
         audio: { type: 'audio' },
       });
+      const stopNetworkBackground = startNetworkBackground(zebar.shellExec, () => providers.outputMap.network);
+      window.addEventListener('pagehide', stopNetworkBackground, { once: true });
       const timeEl = document.getElementById('time');
       const workspacesEl = document.getElementById('workspaces');
       const modesEl = document.getElementById('modes');
@@ -262,7 +270,7 @@
           const fill = powerEl.querySelector('.battery__fill');
           fill.setAttribute('height', String(fillHeight));
           fill.setAttribute('y', String(20 - fillHeight));
-          powerEl.title = `${indicator.label}${failure ? ` — ${failure}` : ''}`;
+          setTitle(powerEl, `${indicator.label}${failure ? ` — ${failure}` : ''}`);
           powerEl.setAttribute('aria-label', `${indicator.label}. Open power and system information`);
           powerBusy = false;
         }
@@ -281,7 +289,8 @@
       });
       providers.onOutput(output => {
         if (output.date) {
-          timeEl.textContent = `${weekday.format(new Date(output.date.now))} ${output.date.formatted}`;
+          const time = `${weekday.format(new Date(output.date.now))} ${output.date.formatted}`;
+          if (timeEl.textContent !== time) timeEl.textContent = time;
         }
         renderVolume(output.audio);
         renderNetwork(output.network);
@@ -294,19 +303,19 @@
       function renderVolume(audio) {
         const device = audio?.defaultPlaybackDevice;
         audioEl.classList.toggle('is-muted', device?.isMuted === true);
-        audioEl.title = device
+        setTitle(audioEl, device
           ? `Audio -- ${device.name}, ${Number.isFinite(device.volume) ? Math.round(device.volume) + '%' : 'volume unavailable'}${device.isMuted ? ', muted' : ''}`
-          : 'Audio -- no output device data';
+          : 'Audio -- no output device data');
       }
       function renderNetwork(net) {
         const { tunnel, iface, link } = networkConnection(net);
         networkEl.dataset.link = link;
         networkEl.classList.toggle('is-vpn', Boolean(tunnel));
-        networkEl.title = !net ? 'Network -- data unavailable' : [
+        setTitle(networkEl, !net ? 'Network -- data unavailable' : [
           link === 'none' ? 'No physical link' : link === 'wifi' ? 'Wi-Fi' : 'Ethernet',
           iface?.friendlyName ?? iface?.name,
           tunnel ? 'VPN (default-route heuristic)' : null,
-        ].filter(Boolean).join(' -- ');
+        ].filter(Boolean).join(' -- '));
       }
       function renderWorkspaces(wm) {
         if (!wm) return;
@@ -323,7 +332,7 @@
       function renderSplit(wm) {
         if (!wm) return;
         splitEl.dataset.direction = wm.tilingDirection ?? '';
-        splitEl.title = `Next split: ${wm.tilingDirection ?? 'unknown'}`;
+        setTitle(splitEl, `Next split: ${wm.tilingDirection ?? 'unknown'}`);
       }
       splitEl.addEventListener('click', () => {
         glazewm?.runCommand('toggle-tiling-direction');

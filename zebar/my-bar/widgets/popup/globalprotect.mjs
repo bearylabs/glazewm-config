@@ -1,6 +1,8 @@
 import * as zebar from 'https://esm.sh/zebar@3.3.1';
 import { executeGlobalProtect } from '../shared/globalprotect-model.mjs';
 import { retainPopupDuringInteraction } from '../shared/popup-controller.mjs';
+import { readSnapshot, writeSnapshot, clearSnapshot, vpnSnapshotValid } from '../shared/snapshot-cache.mjs';
+import { readBackgroundSnapshot } from '../shared/network-background.mjs';
 
 export function renderGlobalProtect(root, reportError) {
   const section = document.createElement('section');
@@ -52,7 +54,9 @@ export function renderGlobalProtect(root, reportError) {
   section.append(header, row, note);
   root.append(section);
 
-  let snapshot = null;
+  const cacheKey = 'my-bar.network.vpn.v1';
+  let snapshot = readSnapshot(cacheKey, vpnSnapshotValid);
+  let verified = false;
   let busy = false;
   let querying = false;
   let stopped = false;
@@ -73,7 +77,7 @@ export function renderGlobalProtect(root, reportError) {
     toggle.title = actionLabel;
     toggle.setAttribute('aria-checked', String(Boolean(snapshot?.connected)));
     section.dataset.connected = String(Boolean(snapshot?.connected));
-    toggle.disabled = busy || Boolean(pending) || Boolean(error) || !snapshot?.available;
+    toggle.disabled = !verified || busy || Boolean(pending) || Boolean(error) || !snapshot?.available;
     open.disabled = busy || snapshot?.available === false;
     section.setAttribute('aria-busy', String(busy || Boolean(pending)));
     note.textContent = error || (pending?.connected ? 'Complete login/MFA in the GlobalProtect client.' : '');
@@ -84,9 +88,12 @@ export function renderGlobalProtect(root, reportError) {
     if (querying || busy || stopped) return;
     querying = true;
     try {
-      const next = await executeGlobalProtect(zebar.shellExec, 'status');
+      const backgroundVpn = !pending ? readBackgroundSnapshot(cacheKey, vpnSnapshotValid) : null;
+      const next = backgroundVpn ?? await executeGlobalProtect(zebar.shellExec, 'status');
       if (stopped) return;
       snapshot = next;
+      verified = true;
+      if (!backgroundVpn) writeSnapshot(cacheKey, snapshot);
       error = '';
       if (pending && snapshot.connected === pending.connected) finishPending();
       if (pending && Date.now() > pending.deadline) {
@@ -94,21 +101,28 @@ export function renderGlobalProtect(root, reportError) {
         reportError(new Error('GlobalProtect did not reach the requested state. Check the client before retrying.'));
       }
     } catch (failure) {
-      if (!stopped) error = failure.message;
+      if (!stopped) {
+        verified = false;
+        clearSnapshot(cacheKey);
+        error = failure.message;
+      }
     } finally {
       querying = false;
       if (!stopped) render();
     }
   }
   async function act(action) {
-    if (busy || stopped || (action !== 'open' && (pending || error || !snapshot?.available))) return;
+    if (busy || stopped || (action !== 'open' && (!verified || pending || error || !snapshot?.available))) return;
     busy = true;
     render();
     try {
       if (action !== 'open') releaseRetention = retainPopupDuringInteraction();
       await executeGlobalProtect(zebar.shellExec, action);
       if (stopped) return;
-      if (action !== 'open') pending = { connected: action === 'connect', deadline: Date.now() + 120000 };
+      if (action !== 'open') {
+        clearSnapshot(cacheKey);
+        pending = { connected: action === 'connect', deadline: Date.now() + 120000 };
+      }
     } catch (failure) {
       finishPending();
       if (!stopped) reportError(failure);
@@ -120,7 +134,10 @@ export function renderGlobalProtect(root, reportError) {
   toggle.addEventListener('click', () => void act(snapshot?.connected ? 'disconnect' : 'connect'));
   open.addEventListener('click', () => void act('open'));
   const interval = setInterval(() => void refresh(), 5000);
+  const onStorage = event => { if (event.key === cacheKey) void refresh(); };
+  window.addEventListener('storage', onStorage);
   window.addEventListener('pagehide', () => {
+    window.removeEventListener('storage', onStorage);
     stopped = true;
     clearInterval(interval);
     finishPending();

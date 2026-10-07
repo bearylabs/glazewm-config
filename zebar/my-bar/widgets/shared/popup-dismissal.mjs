@@ -12,10 +12,13 @@ using System.Text;
 using System.Threading;
 public static class PopupMouse {
   [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
+  [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
   [StructLayout(LayoutKind.Sequential)] public struct Mouse { public Point Position; public uint Data, Flags, Time; public UIntPtr Extra; }
   [StructLayout(LayoutKind.Sequential)] public struct Message { public IntPtr Window; public uint Id; public UIntPtr WParam; public IntPtr LParam; public uint Time; public Point Position; public uint Private; }
   delegate IntPtr Hook(int code, IntPtr message, IntPtr data);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindow(string cls, string title);
+  [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr window, out Rect rect);
   [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
   [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr window, uint flag);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr window, StringBuilder title, int count);
@@ -26,6 +29,30 @@ public static class PopupMouse {
   [DllImport("user32.dll")] static extern bool PeekMessage(out Message message, IntPtr window, uint min, uint max, uint remove);
   [DllImport("user32.dll")] static extern bool TranslateMessage(ref Message message);
   [DllImport("user32.dll")] static extern IntPtr DispatchMessage(ref Message message);
+  public static bool Contains(Rect rect, Point point) {
+    return point.X >= rect.Left && point.X < rect.Right && point.Y >= rect.Top && point.Y < rect.Bottom;
+  }
+  public static bool IsOutsideClick(IntPtr popup, Point point) {
+    // Windows invokes the low-level hook in a DPI-unaware context, even if
+    // Run() set the message-loop thread to per-monitor aware beforehand.
+    // MSLLHOOKSTRUCT.Position stays physical. Set the context HERE, inside
+    // every callback, so GetWindowRect/WindowFromPoint use physical pixels too.
+    var previousDpi = SetThreadDpiAwarenessContext(new IntPtr(-4));
+    if (previousDpi == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+    try {
+      // A transparent WebView can hit-test as a different HWND during activation.
+      // Its physical bounds are authoritative, including before first focus.
+      Rect rect;
+      if (!GetWindowRect(popup, out rect)) return false;
+      if (Contains(rect, point)) return false;
+      var target = GetAncestor(WindowFromPoint(point), 2);
+      var title = new StringBuilder(256);
+      GetWindowText(target, title, title.Capacity);
+      return title.ToString() != "Zebar - my-bar / bar";
+    } finally {
+      SetThreadDpiAwarenessContext(previousDpi);
+    }
+  }
   public static void Run() {
     var gate = new object();
     string request = null;
@@ -52,10 +79,7 @@ public static class PopupMouse {
             var popup = FindWindow(null, "Zebar - my-bar / popup");
             if (popup != IntPtr.Zero) {
               var mouse = (Mouse)Marshal.PtrToStructure(data, typeof(Mouse));
-              var target = GetAncestor(WindowFromPoint(mouse.Position), 2);
-              var title = new StringBuilder(256);
-              GetWindowText(target, title, title.Capacity);
-              if (target != popup && title.ToString() != "Zebar - my-bar / bar") {
+              if (IsOutsideClick(popup, mouse.Position)) {
                 Console.WriteLine("outside:" + request);
                 request = null;
               }

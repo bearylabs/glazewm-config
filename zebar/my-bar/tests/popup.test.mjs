@@ -46,11 +46,11 @@ test('popup owns narrowly scoped power privileges without changing bar docking',
   assert.deepEqual(popup.privileges.shellCommands[5], {
     program: 'powershell.exe', argsRegex: globalProtectArgsRegex(),
   });
-  assert.equal(popup.privileges.shellCommands.length, 6);
+  assert.equal(popup.privileges.shellCommands.length, 8);
   assert.equal(bar.presets[0].height, '28px');
   assert.equal(bar.presets[0].dockToEdge.enabled, true);
   assert.deepEqual(bar.presets[0].monitorSelection, { type: 'all' });
-  assert.equal(bar.privileges.shellCommands.length, 2);
+  assert.equal(bar.privileges.shellCommands.length, 5);
   const powerStatus = bar.privileges.shellCommands[0];
   assert.equal(powerStatus.program, 'powershell.exe');
   const allowed = new RegExp(powerStatus.argsRegex);

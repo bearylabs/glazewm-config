@@ -7,6 +7,10 @@ import { diskUsage, executePowerAction, gib, percent, powerCommands } from '../s
 
 import { renderBluetooth } from './bluetooth.mjs';
 import { renderGlobalProtect } from './globalprotect.mjs';
+import { networkStatsCommand, networkMetrics } from '../shared/network-stats.mjs';
+import { executeWifiRadio } from '../shared/wifi-radio.mjs';
+import { readSnapshot, writeSnapshot, clearSnapshot, radioSnapshotValid, networkSnapshotValid, trafficSnapshotValid } from '../shared/snapshot-cache.mjs';
+import { readBackgroundSnapshot } from '../shared/network-background.mjs';
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -223,13 +227,143 @@ function renderAudio(root, reportError) {
 }
 
 function renderNetwork(root, reportError) {
-  const connection = element('div');
-  const diagnostics = element('details', undefined, 'network-diagnostics');
-  diagnostics.hidden = true;
-  const summary = element('summary', 'Connection details');
-  const diagnosticContent = element('div');
-  diagnostics.append(summary, diagnosticContent);
-  root.append(connection, diagnostics);
+  const networkCacheKey = 'my-bar.network.connection.v1';
+  const trafficCacheKey = 'my-bar.network.traffic.v1';
+  const radioCacheKey = 'my-bar.network.radio.v1';
+  const cachedNetwork = readSnapshot(networkCacheKey, networkSnapshotValid);
+  const cachedTraffic = readSnapshot(trafficCacheKey, trafficSnapshotValid);
+  let liveNetworkSeen = false;
+  const connection = element('div', undefined, 'network-connection');
+  const traffic = element('div', undefined, 'network-traffic');
+  traffic.append(details(cachedTraffic?.entries ?? networkMetrics(null), 'network-details network-overview'));
+  const wifiNote = element('p', '', 'note network-note');
+  wifiNote.hidden = true;
+  wifiNote.setAttribute('role', 'status');
+  const wifiToggle = button('', () => void changeWifi());
+  wifiToggle.id = 'wifi-toggle';
+  wifiToggle.className = 'audio-switch';
+  wifiToggle.setAttribute('role', 'switch');
+  wifiToggle.setAttribute('aria-label', 'Wi-Fi');
+  wifiToggle.disabled = true;
+  const wifiTrack = element('span', undefined, 'audio-switch__track');
+  wifiTrack.setAttribute('aria-hidden', 'true');
+  wifiTrack.append(element('span', undefined, 'audio-switch__knob'));
+  wifiToggle.append(wifiTrack);
+  root.append(connection, traffic, wifiNote);
+  let radio = readSnapshot(radioCacheKey, radioSnapshotValid);
+  let radioVerified = false;
+  let radioBusy = false;
+  let radioQuerying = false;
+  function paintRadio() {
+    wifiToggle.disabled = !radioVerified || radioBusy || !radio?.available;
+    wifiToggle.setAttribute('aria-checked', String(Boolean(radio?.enabled)));
+    wifiToggle.setAttribute('aria-busy', String(radioBusy));
+    wifiToggle.title = radio?.enabled ? 'Turn Wi-Fi off' : 'Turn Wi-Fi on';
+    wifiToggle.setAttribute('aria-label', wifiToggle.title);
+    const currentHeading = connection.querySelector('.network-hero');
+    if (radioVerified && radio?.enabled && currentHeading?.querySelector('.hero__meta').textContent === 'WI-FI OFF') {
+      const wifiConnected = latestInterface && /wifi|wireless|802\.11/i.test(latestInterface.type ?? '');
+      currentHeading.querySelector('.hero__title').textContent = wifiConnected
+        ? latestStats?.ssid || latestInterface.friendlyName || latestInterface.name || 'Wi-Fi' : 'Wi-Fi';
+      currentHeading.querySelector('.hero__meta').textContent = wifiConnected ? 'WI-FI CONNECTION' : 'NOT CONNECTED';
+      currentHeading.querySelector('.hero__icon').replaceChildren(createIcon(wifiConnected ? 'wifi' : 'wifi-off'));
+      traffic.hidden = !wifiConnected;
+    }
+    if (radio?.available && !radio.enabled) {
+      const heading = currentHeading;
+      if (heading && (!latestInterface || /wifi|wireless|802\.11/i.test(latestInterface.type ?? ''))) {
+        heading.querySelector('.hero__title').textContent = 'Wi-Fi';
+        heading.querySelector('.hero__meta').textContent = 'WI-FI OFF';
+        heading.querySelector('.hero__icon').replaceChildren(createIcon('wifi-off'));
+        traffic.hidden = true;
+      }
+    }
+  }
+  async function refreshRadio() {
+    if (radioBusy || radioQuerying || statsClosed) return;
+    radioQuerying = true;
+    try {
+      const backgroundRadio = readBackgroundSnapshot(radioCacheKey, radioSnapshotValid);
+      radio = backgroundRadio ?? await executeWifiRadio(zebar.shellExec, 'status');
+      radioVerified = true;
+      if (!backgroundRadio) writeSnapshot(radioCacheKey, radio);
+      wifiNote.hidden = true;
+    }
+    catch (error) {
+      radioVerified = false;
+      clearSnapshot(radioCacheKey);
+      wifiNote.textContent = error.message; wifiNote.hidden = false; wifiNote.classList.add('error');
+    }
+    finally { radioQuerying = false; paintRadio(); }
+  }
+  async function changeWifi() {
+    if (!radioVerified || radioBusy || radioQuerying || !radio?.available) return;
+    radioBusy = true; paintRadio(); wifiNote.hidden = true;
+    try {
+      const desired = !radio.enabled;
+      const actual = await executeWifiRadio(zebar.shellExec, 'status');
+      radio = actual.enabled === desired ? actual : await executeWifiRadio(zebar.shellExec, desired ? 'on' : 'off');
+      writeSnapshot(radioCacheKey, radio);
+      clearSnapshot(networkCacheKey);
+      clearSnapshot(trafficCacheKey);
+      previousStats = null;
+      void updateStats();
+    } catch (error) { wifiNote.textContent = error.message; wifiNote.hidden = false; wifiNote.classList.add('error'); }
+    finally { radioBusy = false; paintRadio(); }
+  }
+  let previousStats = cachedTraffic?.snapshot ?? null;
+  let previousTime = cachedTraffic?.time ?? 0;
+  let statsBusy = false;
+  let statsClosed = false;
+  let latestStats = cachedTraffic?.snapshot ?? null;
+  let latestInterface = null;
+  function updateWifiLabels() {
+    const title = connection.querySelector('#network-title');
+    if (latestStats?.ssid && title && latestInterface && /wifi|wireless|802\.11/i.test(latestInterface.type ?? '')) { title.textContent = latestStats.ssid; title.title = latestStats.ssid; }
+  }
+  async function updateStats() {
+    if (statsBusy || statsClosed) return;
+    statsBusy = true;
+    try {
+      const backgroundTraffic = readBackgroundSnapshot(trafficCacheKey, trafficSnapshotValid);
+      if (backgroundTraffic) {
+        latestStats = backgroundTraffic.snapshot;
+        previousStats = backgroundTraffic.snapshot; previousTime = backgroundTraffic.time;
+        traffic.replaceChildren(details(backgroundTraffic.entries, 'network-details network-overview'));
+        updateWifiLabels();
+        return;
+      }
+      const result = await zebar.shellExec('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', networkStatsCommand]);
+      if ((result.code ?? result.exitCode) !== 0) throw new Error(result.stderr || 'Network statistics unavailable.');
+      const snapshot = JSON.parse(result.stdout.trim());
+      latestStats = snapshot;
+      updateWifiLabels();
+      const now = Date.now();
+      const entries = [
+        ...networkMetrics(snapshot, previousStats, (now - previousTime) / 1000),
+        ['IP Address', ipv4(latestInterface) || '--'],
+        ['Link rate', linkRate(latestInterface) || '--'],
+      ];
+      traffic.replaceChildren(details(entries, 'network-details network-overview'));
+      if (snapshot) writeSnapshot(trafficCacheKey, { snapshot, time: now, entries });
+      else clearSnapshot(trafficCacheKey);
+      traffic.title = 'Ping measures the Wi-Fi gateway. Byte totals are adapter counters, not session usage.';
+      previousStats = snapshot; previousTime = now;
+    } catch (error) { traffic.title = error.message; }
+    finally { statsBusy = false; }
+  }
+  void updateStats();
+  void refreshRadio();
+  const statsTimer = setInterval(() => { void updateStats(); void refreshRadio(); }, 5000);
+  const onNetworkStorage = event => {
+    if (event.key === trafficCacheKey) void updateStats();
+    if (event.key === radioCacheKey) void refreshRadio();
+  };
+  window.addEventListener('storage', onNetworkStorage);
+  window.addEventListener('pagehide', () => {
+    statsClosed = true; clearInterval(statsTimer);
+    window.removeEventListener('storage', onNetworkStorage);
+  }, { once: true });
   renderGlobalProtect(root, reportError);
   function heading(icon, title, meta) {
     const node = hero(icon, title, meta);
@@ -237,42 +371,41 @@ function renderNetwork(root, reportError) {
     const label = node.querySelector('.hero__title');
     label.id = 'network-title';
     label.title = title;
+    node.append(wifiToggle);
     return node;
   }
   subscribe({ network: { type: 'network', refreshInterval: 5000 } }, (output, errors) => {
-    const net = output.network;
+    if (output.network || errors.network) liveNetworkSeen = true;
+    const net = output.network || (!liveNetworkSeen ? cachedNetwork : null);
+    if (output.network) writeSnapshot(networkCacheKey, {
+      defaultInterface: output.network.defaultInterface ?? null,
+      interfaces: output.network.interfaces ?? [],
+      defaultGateway: output.network.defaultGateway ?? null,
+    });
     if (!net) {
-      diagnostics.hidden = true;
+      if (liveNetworkSeen) { clearSnapshot(networkCacheKey); clearSnapshot(trafficCacheKey); }
+      traffic.hidden = true;
+      latestInterface = null;
       connection.replaceChildren(heading('wifi-off', 'No connection', 'NETWORK DATA UNAVAILABLE'), unavailable('Network', errors.network));
       return;
     }
-    const { tunnel, iface, link } = networkConnection(net);
-    const signal = net.defaultGateway?.signalStrength ?? iface?.signalStrength;
+    const { iface, link } = networkConnection(net);
     const kind = link === 'none' ? 'No physical connection' : link === 'wifi' ? 'Wi-Fi' : 'Ethernet';
-    const name = link === 'wifi' ? net.defaultGateway?.ssid || iface?.friendlyName || iface?.name : kind;
+    const name = link === 'wifi' ? latestStats?.ssid || net.defaultGateway?.ssid || iface?.friendlyName || iface?.name : kind;
     const rate = linkRate(iface);
-    const detail = link === 'wifi' && Number.isFinite(signal) ? percent(signal) : link === 'ethernet' ? rate : null;
     const nodes = [
       heading(link === 'wifi' ? 'wifi' : link === 'ethernet' ? 'ethernet' : 'wifi-off',
-        detail ? `${name} (${detail})` : name || kind, link === 'none' ? 'NOT CONNECTED' : `${kind.toUpperCase()} CONNECTION`),
+        link === 'ethernet' && rate ? `${name} (${rate})` : name || kind, link === 'none' ? 'NOT CONNECTED' : `${kind.toUpperCase()} CONNECTION`),
     ];
-    if (iface) nodes.push(details([
+    latestInterface = iface;
+    if (iface && link !== 'wifi') nodes.push(details([
       ['IP Address', ipv4(iface) || '--'],
-      ...(link === 'wifi' && rate ? [['Link rate', rate]] : []),
     ], 'network-details network-overview'));
-    diagnostics.hidden = !iface && !tunnel;
-    diagnosticContent.replaceChildren(details([
-      ...(iface ? [
-        ['Adapter', iface.friendlyName ?? iface.name],
-        ...(iface.ipv6Addresses?.length ? [['IPv6', iface.ipv6Addresses.join('\n')]] : []),
-      ] : []),
-      ...(tunnel ? [
-        ['VPN route', tunnel.friendlyName ?? tunnel.name],
-        ...(ipv4(tunnel) ? [['Tunnel IP', ipv4(tunnel)]] : []),
-      ] : []),
-    ], 'network-details'));
+    traffic.hidden = link !== 'wifi';
     if (errors.network) nodes.push(unavailable('Network', errors.network));
     connection.replaceChildren(...nodes);
+    updateWifiLabels();
+    paintRadio();
   });
 }
 

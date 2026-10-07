@@ -290,10 +290,8 @@
       .network-details > div { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 20px; align-items: baseline; }
       .panel .network-details dt { color: color-mix(in srgb, var(--text) 60%, transparent); font-size: 11px; }
       .panel .network-details dd { min-width: 0; margin: 0; color: var(--text); font-size: 11px; text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
-      .network-diagnostics { margin-top: 12px; color: var(--panel-caption); font-size: 10px; }
-      .network-diagnostics summary { width: fit-content; cursor: pointer; }
-      .network-diagnostics summary:focus-visible { outline: 1px solid var(--audio-outline); outline-offset: 3px; }
-      .network-diagnostics[open] summary { margin-bottom: 8px; }
+      .network-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 20px; }
+      .network-overview > div { grid-template-columns: auto minmax(0, 1fr); gap: 8px; }
       .panel .network-note { margin: 8px 10px 0; color: var(--panel-caption); font-size: 11px; }
       .panel .network-note.error { color: var(--red); }
       .panel .audio-switch { display: grid; place-items: center; flex: 0 0 54px; width: 54px; height: 34px; padding: 6px; background: transparent; border: 1px solid transparent; border-radius: 0; }

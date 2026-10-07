@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createOutsideClickWatcher, spawnOutsideClickProcess } from '../widgets/shared/popup-dismissal.mjs';
+import { outsideClickArgs, createOutsideClickWatcher, spawnOutsideClickProcess } from '../widgets/shared/popup-dismissal.mjs';
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
@@ -33,6 +33,24 @@ async function warm(env) {
   env.processes.at(-1).handlers.stdout('ready\r\n');
   await pending;
 }
+
+test('native hit testing sets physical per-monitor coordinates inside every hook callback', () => {
+  const source = outsideClickArgs.at(-1);
+  const classifier = source.slice(source.indexOf('public static bool IsOutsideClick'), source.indexOf('public static void Run()'));
+  const run = source.slice(source.indexOf('public static void Run()'));
+  assert.match(classifier, /SetThreadDpiAwarenessContext\(new IntPtr\(-4\)\)/);
+  assert(classifier.indexOf('SetThreadDpiAwarenessContext(new IntPtr(-4))') < classifier.indexOf('GetWindowRect(popup'),
+    'Windows resets the callback DPI context; setting it once in Run() is insufficient.');
+  assert.match(classifier, /previousDpi == IntPtr.Zero\) throw new Win32Exception/);
+  assert.match(classifier, /finally \{\s*SetThreadDpiAwarenessContext\(previousDpi\)/);
+  assert.match(run, /IsOutsideClick\(popup, mouse.Position\)/);
+  assert(source.indexOf('if (Contains(rect, point)) return false;') < source.indexOf('GetAncestor(WindowFromPoint(point), 2)'),
+    'Internal clicks must be rejected before unreliable HWND hit testing.');
+  assert.match(source, /if \(!GetWindowRect\(popup, out rect\)\) return false;/,
+    'An unavailable/destroyed popup must not manufacture an outside click.');
+  assert.match(run, /return CallNextHookEx/,
+    'The watcher must never consume popup button or slider input.');
+});
 
 test('Zebar 3.3.1 compatibility sends pid to the native write and kill commands', async () => {
   const calls = [];
