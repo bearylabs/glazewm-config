@@ -254,6 +254,7 @@ function renderNetwork(root, reportError) {
   let radioVerified = false;
   let radioBusy = false;
   let radioQuerying = false;
+  let radioInitialized = false;
   function paintRadio() {
     wifiToggle.disabled = !radioVerified || radioBusy || !radio?.available;
     wifiToggle.setAttribute('aria-checked', String(Boolean(radio?.enabled)));
@@ -283,7 +284,8 @@ function renderNetwork(root, reportError) {
     if (radioBusy || radioQuerying || statsClosed) return;
     radioQuerying = true;
     try {
-      const backgroundRadio = readBackgroundSnapshot(radioCacheKey, radioSnapshotValid);
+      const backgroundRadio = !radioInitialized ? readBackgroundSnapshot(radioCacheKey, radioSnapshotValid) : null;
+      radioInitialized = true;
       radio = backgroundRadio ?? await executeWifiRadio(zebar.shellExec, 'status');
       radioVerified = true;
       if (!backgroundRadio) writeSnapshot(radioCacheKey, radio);
@@ -314,6 +316,7 @@ function renderNetwork(root, reportError) {
   let previousStats = cachedTraffic?.snapshot ?? null;
   let previousTime = cachedTraffic?.time ?? 0;
   let statsBusy = false;
+  let statsInitialized = false;
   let statsClosed = false;
   let latestStats = cachedTraffic?.snapshot ?? null;
   let latestInterface = null;
@@ -325,7 +328,8 @@ function renderNetwork(root, reportError) {
     if (statsBusy || statsClosed) return;
     statsBusy = true;
     try {
-      const backgroundTraffic = readBackgroundSnapshot(trafficCacheKey, trafficSnapshotValid);
+      const backgroundTraffic = !statsInitialized ? readBackgroundSnapshot(trafficCacheKey, trafficSnapshotValid) : null;
+      statsInitialized = true;
       if (backgroundTraffic) {
         latestStats = backgroundTraffic.snapshot;
         previousStats = backgroundTraffic.snapshot; previousTime = backgroundTraffic.time;
@@ -354,7 +358,7 @@ function renderNetwork(root, reportError) {
   }
   void updateStats();
   void refreshRadio();
-  const statsTimer = setInterval(() => { void updateStats(); void refreshRadio(); }, 5000);
+  const statsTimer = setInterval(() => { void updateStats(); void refreshRadio(); }, 1000);
   const onNetworkStorage = event => {
     if (event.key === trafficCacheKey) void updateStats();
     if (event.key === radioCacheKey) void refreshRadio();
@@ -374,7 +378,7 @@ function renderNetwork(root, reportError) {
     node.append(wifiToggle);
     return node;
   }
-  subscribe({ network: { type: 'network', refreshInterval: 5000 } }, (output, errors) => {
+  subscribe({ network: { type: 'network', refreshInterval: 1000 } }, (output, errors) => {
     if (output.network || errors.network) liveNetworkSeen = true;
     const net = output.network || (!liveNetworkSeen ? cachedNetwork : null);
     if (output.network) writeSnapshot(networkCacheKey, {

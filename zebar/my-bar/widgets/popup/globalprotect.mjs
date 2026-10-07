@@ -59,6 +59,7 @@ export function renderGlobalProtect(root, reportError) {
   let verified = false;
   let busy = false;
   let querying = false;
+  let initialized = false;
   let stopped = false;
   let pending = null;
   let error = '';
@@ -88,7 +89,8 @@ export function renderGlobalProtect(root, reportError) {
     if (querying || busy || stopped) return;
     querying = true;
     try {
-      const backgroundVpn = !pending ? readBackgroundSnapshot(cacheKey, vpnSnapshotValid) : null;
+      const backgroundVpn = !initialized && !pending ? readBackgroundSnapshot(cacheKey, vpnSnapshotValid) : null;
+      initialized = true;
       const next = backgroundVpn ?? await executeGlobalProtect(zebar.shellExec, 'status');
       if (stopped) return;
       snapshot = next;
@@ -133,7 +135,7 @@ export function renderGlobalProtect(root, reportError) {
   }
   toggle.addEventListener('click', () => void act(snapshot?.connected ? 'disconnect' : 'connect'));
   open.addEventListener('click', () => void act('open'));
-  const interval = setInterval(() => void refresh(), 5000);
+  const interval = setInterval(() => void refresh(), 1000);
   const onStorage = event => { if (event.key === cacheKey) void refresh(); };
   window.addEventListener('storage', onStorage);
   window.addEventListener('pagehide', () => {

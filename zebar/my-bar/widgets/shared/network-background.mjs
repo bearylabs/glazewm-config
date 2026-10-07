@@ -14,10 +14,10 @@ export const networkBackgroundPermissions = [
 
 export function readBackgroundSnapshot(key, validate, storage, now = Date.now()) {
   const lease = readSnapshot('my-bar.network.poller.v1', value => value && typeof value.owner === 'string' && Number.isFinite(value.until), storage, now);
-  return lease && lease.until > now ? readSnapshot(key, validate, storage, now, 7500) : null;
+  return lease && lease.until > now ? readSnapshot(key, validate, storage, now, 35000) : null;
 }
 
-export function startNetworkBackground(exec, getNetwork, { storage, interval = 5000, now = Date.now, schedule = setInterval, cancel = clearInterval } = {}) {
+export function startNetworkBackground(exec, getNetwork, { storage, interval = 30000, now = Date.now, schedule = setInterval, cancel = clearInterval } = {}) {
   let busy = false;
   let stopped = false;
   let previous = null;
@@ -29,7 +29,7 @@ export function startNetworkBackground(exec, getNetwork, { storage, interval = 5
     if (busy || stopped) return;
     const lease = readSnapshot(leaseKey, validLease, storage, now());
     if (lease && lease.owner !== owner && lease.until > now()) return;
-    writeSnapshot(leaseKey, { owner, until: now() + 30000 }, storage, now());
+    writeSnapshot(leaseKey, { owner, until: now() + Math.max(90000, interval * 3) }, storage, now());
     const acquired = readSnapshot(leaseKey, validLease, storage, now());
     if (acquired && acquired.owner !== owner) return;
     busy = true;

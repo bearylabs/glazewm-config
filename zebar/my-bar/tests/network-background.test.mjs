@@ -24,17 +24,17 @@ function execFixture() {
 test('background poller updates traffic, WLAN and VPN without any open popup', async () => {
   const storage = store(); let time = 1000; let tick; let canceled = false;
   const { exec, calls } = execFixture();
-  const stop = startNetworkBackground(exec, () => network, { storage, now: () => time, schedule: fn => { tick = fn; return 1; }, cancel: () => { canceled = true; } });
+  const stop = startNetworkBackground(exec, () => network, { storage, now: () => time, schedule: (fn, delay) => { assert.equal(delay, 30000); tick = fn; return 1; }, cancel: () => { canceled = true; } });
   await settle();
   assert.equal(calls.length, 3);
-  time += 5000; tick(); await settle();
+  time += 30000; tick(); await settle();
   assert.equal(calls.length, 6);
   const traffic = readSnapshot('my-bar.network.traffic.v1', trafficSnapshotValid, storage, time);
-  assert.equal(Object.fromEntries(traffic.entries).Receiving, '6.0 KB/s');
+  assert.equal(Object.fromEntries(traffic.entries).Receiving, '1.0 KB/s');
   assert.equal(Object.fromEntries(traffic.entries)['IP Address'], '10.0.0.2');
   assert.deepEqual(readSnapshot('my-bar.network.radio.v1', radioSnapshotValid, storage, time), { available: true, enabled: true });
   assert.deepEqual(readBackgroundSnapshot('my-bar.network.radio.v1', radioSnapshotValid, storage, time), { available: true, enabled: true });
-  assert.equal(readBackgroundSnapshot('my-bar.network.radio.v1', radioSnapshotValid, storage, time + 7501), null);
+  assert.equal(readBackgroundSnapshot('my-bar.network.radio.v1', radioSnapshotValid, storage, time + 35001), null);
   assert.deepEqual(readSnapshot('my-bar.network.vpn.v1', vpnSnapshotValid, storage, time), { available: true, connected: false });
   stop(); tick(); await settle(); assert(canceled); assert.equal(calls.length, 6);
   assert.equal(readBackgroundSnapshot('my-bar.network.radio.v1', radioSnapshotValid, storage, time), null);

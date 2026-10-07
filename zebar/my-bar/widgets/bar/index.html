@@ -238,7 +238,7 @@
       const providers = zebar.createProviderGroup({
         date: { type: 'date', refreshInterval: 1000, formatting: 'HH:mm' },
         glazewm: { type: 'glazewm' },
-        network: { type: 'network', refreshInterval: 5000 },
+        network: { type: 'network', refreshInterval: 30000 },
         audio: { type: 'audio' },
       });
       const stopNetworkBackground = startNetworkBackground(zebar.shellExec, () => providers.outputMap.network);
