@@ -19,13 +19,14 @@ try {
     exit 0
   }
   if (!(Test-Path -LiteralPath $app)) { throw 'GlobalProtect is not installed in its standard location.' }
-  Start-Process -FilePath $app
+  if ($action -ne 'hide') { Start-Process -FilePath $app }
   if ($action -eq 'open') { [pscustomobject]@{ requested = 'open' } | ConvertTo-Json -Compress; exit 0 }
   Add-Type -AssemblyName UIAutomationClient
   Add-Type -AssemblyName UIAutomationTypes
-  Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class GlobalProtectButton { [DllImport("user32.dll", SetLastError=true)] public static extern IntPtr SendMessageTimeout(IntPtr window, uint message, IntPtr wParam, IntPtr lParam, uint flags, uint timeout, out UIntPtr result); }'
-  $expected = if ($action -eq 'connect') { 'Connect' } else { 'Disconnect' }
+  Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class GlobalProtectButton { [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr window, int command); [DllImport("user32.dll", SetLastError=true)] public static extern IntPtr SendMessageTimeout(IntPtr window, uint message, IntPtr wParam, IntPtr lParam, uint flags, uint timeout, out UIntPtr result); }'
+  $expected = if ($action -eq 'connect') { @('Connect') } elseif ($action -eq 'disconnect') { @('Disconnect') } else { @('Connect', 'Disconnect') }
   $button = $null
+  $buttonWindow = $null
   for ($attempt = 0; $attempt -lt 20; $attempt++) {
     $ids = @(Get-Process PanGPA -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $app } | ForEach-Object { $_.Id })
     $desktop = [System.Windows.Automation.AutomationElement]::RootElement
@@ -37,17 +38,27 @@ try {
       $controls = $window.FindAll([System.Windows.Automation.TreeScope]::Subtree, $condition)
       foreach ($control in $controls) {
         $c = $control.Current
-        if ($c.Name -eq $expected -and $c.ClassName -eq 'Button' -and $c.IsEnabled -and !$c.IsOffscreen -and $c.NativeWindowHandle -ne 0) { $matches += $control }
+        if ($c.Name -in $expected -and $c.ClassName -eq 'Button' -and $c.IsEnabled -and !$c.IsOffscreen -and $c.NativeWindowHandle -ne 0) { $matches += [pscustomobject]@{ button = $control; window = $window } }
       }
     }
     if ($matches.Count -gt 1) { throw 'Multiple GlobalProtect buttons found; no click sent.' }
-    if ($matches.Count -eq 1) { $button = $matches[0]; break }
+    if ($matches.Count -eq 1) { $button = $matches[0].button; $buttonWindow = $matches[0].window; break }
+    # The client can already have dismissed its tray popup after disconnecting.
+    if ($action -eq 'hide') { [pscustomobject]@{ requested = 'hide' } | ConvertTo-Json -Compress; exit 0 }
     Start-Sleep -Milliseconds 250
   }
   if (!$button) { throw ('No enabled ' + $expected + ' button found. Use the official client; its state or language may have changed.') }
   # Recheck immediately: never use the shared button ID as a blind toggle.
   $c = $button.Current
-  if ($c.Name -ne $expected -or !$c.IsEnabled -or $c.IsOffscreen) { throw 'GlobalProtect state changed; no click sent.' }
+  if ($c.Name -notin $expected -or !$c.IsEnabled -or $c.IsOffscreen) { throw 'GlobalProtect state changed; no action sent.' }
+  if ($action -eq 'hide') {
+    # Hide only the verified main popup, never login/MFA windows or the process.
+    $w = $buttonWindow.Current
+    if ($w.ProcessId -notin $ids -or $w.NativeWindowHandle -eq 0) { throw 'GlobalProtect window changed; not hidden.' }
+    if (!$w.IsOffscreen -and ![GlobalProtectButton]::ShowWindowAsync([IntPtr]$w.NativeWindowHandle, 0)) { throw 'Could not hide the GlobalProtect window.' }
+    [pscustomobject]@{ requested = 'hide' } | ConvertTo-Json -Compress
+    exit 0
+  }
   $result = [UIntPtr]::Zero
   $sent = [GlobalProtectButton]::SendMessageTimeout([IntPtr]$c.NativeWindowHandle, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero, 2, 2000, [ref]$result)
   if ($sent -eq [IntPtr]::Zero) { throw 'GlobalProtect click failed or timed out. Check the client before retrying.' }
@@ -58,7 +69,7 @@ try {
   exit 1
 }`;
 
-const actions = ['status', 'connect', 'disconnect', 'open'];
+const actions = ['status', 'connect', 'disconnect', 'open', 'hide'];
 export function globalProtectArgs(action) {
   if (!actions.includes(action)) throw new Error('Invalid GlobalProtect action.');
   return ['-NoProfile', '-NonInteractive', '-Command', script.replace('__ACTION__', action)];
@@ -66,7 +77,7 @@ export function globalProtectArgs(action) {
 const escape = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 export function globalProtectArgsRegex() {
   return '^' + escape(['-NoProfile', '-NonInteractive', '-Command', script].join(' '))
-    .replace('__ACTION__', '(?:status|connect|disconnect|open)') + '$';
+    .replace('__ACTION__', '(?:status|connect|disconnect|open|hide)') + '$';
 }
 
 export async function executeGlobalProtect(shellExec, action, queryTimeout = 15000) {

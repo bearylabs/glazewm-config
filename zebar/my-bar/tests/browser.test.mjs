@@ -722,11 +722,15 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
         const toggle = document.getElementById('globalprotect-toggle');
         const button = toggle.getBoundingClientRect();
         const track = toggle.querySelector('.network-vpn__track').getBoundingClientRect();
-        return { openPadding: getComputedStyle(open).padding, switchPadding: getComputedStyle(toggle).padding,
+        const openRect = open.getBoundingClientRect();
+        const icon = open.querySelector('svg').getBoundingClientRect();
+        return { iconDx: (openRect.left + openRect.width / 2) - (icon.left + icon.width / 2),
+          iconDy: (openRect.top + openRect.height / 2) - (icon.top + icon.height / 2), openPadding: getComputedStyle(open).padding, switchPadding: getComputedStyle(toggle).padding,
           dx: (button.left + button.width / 2) - (track.left + track.width / 2),
           dy: (button.top + button.height / 2) - (track.top + track.height / 2) };
       })()`);
       assert.equal(geometry.openPadding, '0px');
+      assert(Math.abs(geometry.iconDx) < 0.1 && Math.abs(geometry.iconDy) < 0.1, JSON.stringify(geometry));
       assert.equal(geometry.switchPadding, '6px');
       assert(Math.abs(geometry.dx) < 0.1 && Math.abs(geometry.dy) < 0.1, JSON.stringify(geometry));
       for (const id of ['globalprotect-open', 'globalprotect-toggle']) {
@@ -766,11 +770,13 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert(await evaluate("document.getElementById('globalprotect-toggle').disabled"));
       assert(await evaluate('window.__test.retained'));
       assert.match(await evaluate("document.querySelector('.network-vpn .note').textContent"), /MFA/);
+      assert.equal(await evaluate("window.__test.calls.filter(c => c[0] === 'globalprotect' && c[1] === 'hide').length"), 0);
       await evaluate(`window.__test.globalprotect = { available: true, connected: true };
         window.__test.data.network.defaultInterface = window.__test.data.network.interfaces[0];
         window.__test.notify(); window.__refreshGlobalProtect()`);
       assert.equal(await evaluate("document.getElementById('globalprotect-toggle').getAttribute('aria-label')"), 'Disconnect GlobalProtect');
       assert.equal(await evaluate("document.getElementById('globalprotect-toggle').getAttribute('aria-checked')"), 'true');
+      assert.equal(await evaluate("getComputedStyle(document.querySelector('.network-vpn__row')).backgroundColor"), 'rgba(0, 0, 0, 0)');
       assert(await evaluate("document.querySelector('.network-vpn .note').hidden"));
       assert.equal(await evaluate('window.__test.retained'), false);
       await evaluate("document.getElementById('globalprotect-toggle').click()");
@@ -787,9 +793,20 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       await evaluate("document.getElementById('globalprotect-open').click()");
       await pause(30);
       assert.deepEqual(await evaluate("window.__test.calls.filter(c => c[0] === 'globalprotect' && c[1] !== 'status')"),
-        [['globalprotect', 'connect'], ['globalprotect', 'disconnect'], ['globalprotect', 'connect'], ['globalprotect', 'open']]);
+        [['globalprotect', 'connect'], ['globalprotect', 'hide'], ['globalprotect', 'disconnect'], ['globalprotect', 'hide'], ['globalprotect', 'connect'], ['globalprotect', 'open']]);
       await evaluate('window.__test.globalprotect.available = false; window.__refreshGlobalProtect()');
       assert(await evaluate("document.getElementById('globalprotect-toggle').disabled"));
+    });
+    await t.test('explicit Open client during a pending VPN action prevents automatic hiding', async () => {
+      await load('network');
+      await evaluate('window.__refreshGlobalProtect()');
+      await evaluate("document.getElementById('globalprotect-toggle').click()");
+      await pause(30);
+      await evaluate("document.getElementById('globalprotect-open').click()");
+      await pause(30);
+      await evaluate('window.__test.globalprotect = { available: true, connected: true }; window.__refreshGlobalProtect()');
+      assert.equal(await evaluate("document.getElementById('globalprotect-toggle').getAttribute('aria-checked')"), 'true');
+      assert.equal(await evaluate("window.__test.calls.filter(c => c[0] === 'globalprotect' && c[1] === 'hide').length"), 0);
     });
     await t.test('network cache paints immediately while live status queries are pending', async () => {
       await load('network');

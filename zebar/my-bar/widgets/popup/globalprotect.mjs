@@ -41,7 +41,19 @@ export function renderGlobalProtect(root, reportError) {
   const open = document.createElement('button');
   open.id = 'globalprotect-open';
   open.type = 'button';
-  open.textContent = '↗';
+  const openIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  openIcon.setAttribute('viewBox', '0 0 24 24');
+  openIcon.setAttribute('aria-hidden', 'true');
+  openIcon.setAttribute('focusable', 'false');
+  const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  arrow.setAttribute('d', 'M6 18 18 6M6 6h12v12');
+  arrow.setAttribute('fill', 'none');
+  arrow.setAttribute('stroke', 'currentColor');
+  arrow.setAttribute('stroke-width', '2');
+  arrow.setAttribute('stroke-linecap', 'round');
+  arrow.setAttribute('stroke-linejoin', 'round');
+  openIcon.append(arrow);
+  open.append(openIcon);
   open.className = 'network-vpn__open';
   open.setAttribute('aria-label', 'Open GlobalProtect client');
   open.title = 'Open GlobalProtect client';
@@ -97,7 +109,16 @@ export function renderGlobalProtect(root, reportError) {
       verified = true;
       if (!backgroundVpn) writeSnapshot(cacheKey, snapshot);
       error = '';
-      if (pending && snapshot.connected === pending.connected) finishPending();
+      if (pending && snapshot.connected === pending.connected) {
+        const dismissClient = pending.dismissClient;
+        finishPending();
+        if (dismissClient) {
+          busy = true;
+          try { await executeGlobalProtect(zebar.shellExec, 'hide'); }
+          catch (failure) { if (!stopped) reportError(new Error(`VPN state confirmed, but the client window could not be hidden: ${failure.message}`)); }
+          finally { busy = false; }
+        }
+      }
       if (pending && Date.now() > pending.deadline) {
         finishPending();
         reportError(new Error('GlobalProtect did not reach the requested state. Check the client before retrying.'));
@@ -115,6 +136,8 @@ export function renderGlobalProtect(root, reportError) {
   }
   async function act(action) {
     if (busy || stopped || (action !== 'open' && (!verified || pending || error || !snapshot?.available))) return;
+    // An explicit Open client request overrides automatic dismissal for this operation.
+    if (action === 'open' && pending) pending.dismissClient = false;
     busy = true;
     render();
     try {
@@ -123,7 +146,7 @@ export function renderGlobalProtect(root, reportError) {
       if (stopped) return;
       if (action !== 'open') {
         clearSnapshot(cacheKey);
-        pending = { connected: action === 'connect', deadline: Date.now() + 120000 };
+        pending = { connected: action === 'connect', dismissClient: true, deadline: Date.now() + 120000 };
       }
     } catch (failure) {
       finishPending();

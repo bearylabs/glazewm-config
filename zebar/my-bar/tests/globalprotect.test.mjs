@@ -3,13 +3,13 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { executeGlobalProtect, globalProtectArgs, globalProtectArgsRegex } from '../widgets/shared/globalprotect-model.mjs';
 
-test('GlobalProtect permissions match only fixed status/open/connect/disconnect commands', async () => {
+test('GlobalProtect permissions match only fixed status/open/connect/disconnect/hide commands', async () => {
   const pack = JSON.parse(await readFile(new URL('../zpack.json', import.meta.url), 'utf8'));
   const permissions = pack.widgets.find(w => w.name === 'popup').privileges.shellCommands;
   const permission = permissions.find(p => p.argsRegex === globalProtectArgsRegex());
   assert.equal(permission?.program, 'powershell.exe');
   const regex = new RegExp(permission.argsRegex);
-  for (const action of ['status', 'open', 'connect', 'disconnect']) {
+  for (const action of ['status', 'open', 'connect', 'disconnect', 'hide']) {
     const args = globalProtectArgs(action).join(' ');
     assert(regex.test(args), action);
     assert(!regex.test(args + '; Start-Process evil.exe'));
@@ -23,12 +23,22 @@ test('GlobalProtect permissions match only fixed status/open/connect/disconnect 
 test('native helper checks process, button name, visibility and enabled state before a single bounded click', () => {
   const command = globalProtectArgs('connect')[3];
   assert.match(command, /\$_.Path -eq \$app/);
-  assert.match(command, /\$c.Name -eq \$expected/);
+  assert.match(command, /\$c.Name -in \$expected/);
   assert.match(command, /\$c.IsEnabled -and !\$c.IsOffscreen/);
   assert.match(command, /Multiple GlobalProtect buttons/);
   assert.match(command, /2, 2000, \[ref\]\$result/);
   assert(!command.includes('Disable-NetAdapter'));
   assert(!command.includes('Enable-NetAdapter'));
+});
+
+test('hide never opens or clicks the client and targets only its verified main popup', () => {
+  const command = globalProtectArgs('hide')[3];
+  assert.match(command, /if \(\$action -ne 'hide'\) \{ Start-Process/);
+  assert.match(command, /\$buttonWindow = \$matches\[0\]\.window/);
+  assert.match(command, /\$w.ProcessId -notin \$ids/);
+  assert.match(command, /ShowWindowAsync\(\[IntPtr\]\$w.NativeWindowHandle, 0\)/);
+  assert(command.indexOf("requested = 'hide'", command.indexOf('$w = $buttonWindow.Current')) < command.indexOf('0x00F5'));
+  assert(!command.includes('Stop-Process'));
 });
 
 test('status validates booleans and supports split-tunnel adapter detection', async () => {
