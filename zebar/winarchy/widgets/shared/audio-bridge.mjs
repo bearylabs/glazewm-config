@@ -10,6 +10,8 @@ function snapshot(audio, error) {
     audio: audio && !error ? {
       playbackDevices: audio.playbackDevices ?? [],
       defaultPlaybackDevice: audio.defaultPlaybackDevice ?? null,
+      recordingDevices: audio.recordingDevices ?? [],
+      defaultRecordingDevice: audio.defaultRecordingDevice ?? null,
     } : null,
     error: message(error),
   };
@@ -38,8 +40,9 @@ export function createAudioOwner(read, {
       const { audio, error } = read();
       if (error || !audio) throw new Error(message(error) ?? 'Audio provider unavailable.');
       // A queued slider command must not act on a different or removed device.
-      if (!audio.playbackDevices?.some(device => device.deviceId === data.deviceId)) {
-        throw new Error('Output device is no longer connected.');
+      if (![...(audio.playbackDevices ?? []), ...(audio.recordingDevices ?? [])]
+        .some(device => device.deviceId === data.deviceId)) {
+        throw new Error('Audio device is no longer connected.');
       }
       if (data.action === 'volume' && Number.isFinite(data.value) && data.value >= 0 && data.value <= 100) {
         await audio.setVolume(data.value, { deviceId: data.deviceId });

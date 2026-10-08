@@ -85,6 +85,40 @@ test('repeated popup closes release all transport resources, never the owner', a
   owner.close(); assert.equal(h.channels.size, 0);
 });
 
+test('recording snapshots and commands use the same owner without touching output', async () => {
+  const h = harness();
+  const microphone = { deviceId: 'microphone', name: 'Microphone', volume: 35, isMuted: false };
+  h.state.audio.recordingDevices = [microphone];
+  h.state.audio.defaultRecordingDevice = microphone;
+  h.state.audio.setVolume = async (value, options) => {
+    h.calls.push(['volume', value, options]);
+    microphone.volume = value;
+  };
+  h.state.audio.setMute = async (value, options) => {
+    h.calls.push(['mute', value, options]);
+    microphone.isMuted = value;
+  };
+  const owner = h.owner('bar'); const client = h.client(); await h.flush();
+  assert.deepEqual(client.outputMap.audio.recordingDevices, [microphone]);
+  assert.equal(client.outputMap.audio.defaultRecordingDevice.volume, 35);
+  const volume = client.outputMap.audio.setVolume(68, { deviceId: 'microphone' });
+  await h.flush(); await volume;
+  const mute = client.outputMap.audio.setMute(true, { deviceId: 'microphone' });
+  await h.flush(); await mute;
+  assert.deepEqual(h.calls, [['volume', 68, { deviceId: 'microphone' }], ['mute', true, { deviceId: 'microphone' }]]);
+  assert.equal(client.outputMap.audio.defaultRecordingDevice.isMuted, true);
+  assert.equal(client.outputMap.audio.defaultPlaybackDevice.volume, 42);
+  h.state.audio.recordingDevices = [];
+  h.state.audio.defaultRecordingDevice = null;
+  owner.publish(); await h.flush();
+  assert.equal(client.outputMap.audio.defaultRecordingDevice, null);
+  const removed = client.outputMap.audio.setVolume(10, { deviceId: 'microphone' });
+  const rejection = assert.rejects(removed, /no longer connected/);
+  await h.flush(); await rejection;
+  assert.equal(h.calls.length, 2);
+  client.close(); owner.close();
+});
+
 test('multiple monitor bars execute a command exactly once and permit owner handover', async () => {
   const h = harness(); const first = h.owner('first'); const second = h.owner('second');
   const client = h.client(); await h.flush();

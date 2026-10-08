@@ -33,6 +33,57 @@ logout and lock permissions.
 
 The bar uses Catppuccin Mocha Base (`#1e1e2e`). Its native window stays topmost so neighboring window shadows cannot darken the background when focus changes. GlazeWM fullscreen temporarily switches it to the normal layer so fullscreen can still cover the bar. Workspace highlights are unchanged. Restart Zebar after changing the initial layer in `zpack.json`.
 
+## PowerToys Awake toggle
+
+A coffee icon sits immediately left of the centered clock without moving it.
+It fades in while the pointer is anywhere over the bar (or when keyboard-focused),
+including when Awake is on. Off uses the muted color; on uses normal foreground.
+Clicking switches PowerToys Awake between passive and indefinite mode. Screen,
+timer and other PowerToys settings are preserved. Enable Awake in PowerToys
+Settings first; the button is disabled when its settings or process are missing.
+
+The bar reads the live process/settings at startup, every ten seconds and on
+hover, so changes in PowerToys also update the icon. Clicks re-read the native
+state under a cross-monitor mutex before toggling; no duplicate Awake process
+is launched. Failures appear in the bar's existing error indicator. Normal
+Windows sleep behavior resumes in passive mode; Awake does not bypass the
+Windows lock screen. Restart Zebar after updating to load the new exact shell
+permissions.
+
+## Windows Do not disturb toggle
+
+A 10px muted-bell icon sits left of Awake and follows the same hover-only
+visibility and muted/off versus normal/on colors. It toggles Windows Do not
+disturb itself, not application notification permissions or a Focus timer.
+State is read at startup, on hover and every ten seconds.
+
+Windows exposes no public setter for this switch. The native helper uses the
+Quiet Hours COM interface to switch between unrestricted and priority-only
+notifications, then verifies the effective profile before reporting success.
+Turning off also dismisses an active automatic quiet moment without deleting
+its configured rule. Scheduled/fullscreen rules may activate again later,
+just as when using the Windows switch. Alarms-only counts as enabled.
+No registry blobs are edited and no keyboard shortcuts or Windows panels
+are opened. Unsupported interfaces, policy restrictions and native failures
+are reported in the bar instead of pretending the toggle succeeded.
+Restart Zebar to load the exact read/toggle shell permissions.
+
+## Windows Night light toggle
+
+A 10px moon icon sits left of Do not disturb and Awake. Like the other two,
+it appears on bar hover or keyboard focus, muted when off and normal when on.
+Clicking toggles Windows Night light; its schedule and color temperature are
+not changed. External and scheduled changes refresh on hover and every ten
+seconds. Unsupported displays disable the button.
+
+There is no public Windows Night light toggle API. The helper validates the
+current CloudStore/Bond CompactBinary state before updating only its on/off
+state and manual-transition timestamps. It does not use fixed byte offsets,
+change the settings blob, simulate keyboard input or open Settings. Unknown
+formats/fields are rejected without writing, and failures use the bar error
+indicator. Monitor-bar clicks are serialized with a native mutex; a changed
+snapshot is not overwritten. Restart Zebar to load the exact shell permissions.
+
 ## Reusable popups
 
 Restart Zebar after updating. Bar startup preloads one native popup WebView and all its modules in the background. It starts as a transparent, nonfocused 1px surface outside the entire virtual desktop, then hides itself without rendering providers or waiting for animation frames. All monitor bars share one startup lock and cache, so they do not create duplicate windows. Once startup finishes, even the first click reuses the loaded WebView. A click during startup waits for completion; if prewarming fails, a real click retries normally.
@@ -43,9 +94,14 @@ Each opening gets fresh content and a new request ID. Hiding or replacing a sess
 
 ## Audio crash workaround
 
-Only the persistent monitor bars subscribe to Zebar's native audio provider. The Audio popup receives serializable snapshots through `BroadcastChannel` and routes volume/mute commands to one responding bar, so multi-monitor desktops do not execute a command twice. Closing/replacing the popup closes only its channel, timer and pending requests; it never creates, stops or restarts the native audio provider. Device selection remains the existing narrowly permitted one-shot popup shell command; subsequent state comes from the bar.
+The Audio popup shows input volume and device selection below the matching
+output controls, separated by a divider without an extra heading or input toggle.
+Each section independently follows its Windows default device;
+selection changes all three Windows default roles for that direction.
 
-This avoids Zebar 3.3.1 stopping its shared audio provider on popup close and leaving an endpoint notification callback registered after freeing it. Command failures/timeouts are reported without automatic retries. Missing bars disable controls; there is deliberately no fallback native popup provider. This is a lifecycle workaround, not a fix for all native audio bugs. Restart Zebar once after updating to discard any callbacks left behind by the old code. No upstream changes or additional shell permissions are required.
+Only the persistent monitor bars subscribe to Zebar's native audio provider. The Audio popup receives serializable playback and recording snapshots through `BroadcastChannel` and routes volume/mute commands to one responding bar, so multi-monitor desktops do not execute a command twice. Closing/replacing the popup closes only its channel, timer and pending requests; it never creates, stops or restarts the native audio provider. Device selection uses narrowly permitted one-shot popup shell commands for playback and recording endpoints; subsequent state comes from the bar.
+
+This avoids Zebar 3.3.1 stopping its shared audio provider on popup close and leaving an endpoint notification callback registered after freeing it. Command failures/timeouts are reported without automatic retries. Missing bars disable controls; there is deliberately no fallback native popup provider. This is a lifecycle workaround, not a fix for all native audio bugs. Restart Zebar after updating to load the recording-device selection permission and discard any callbacks left behind by the old code. No upstream changes are required.
 
 ## Display popup
 

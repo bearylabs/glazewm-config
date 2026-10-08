@@ -13,9 +13,9 @@ export function outputVolumeName(volume, muted) {
   return 'Whisper';
 }
 
-// Zebar 3.3.1 exposes active playback devices, but no default-device setter.
-// Windows' PolicyConfig COM interface is used only to change playback defaults.
-const endpointId = /^\{0\.0\.0\.00000000\}\.\{[0-9a-fA-F-]{36}\}$/;
+// Zebar 3.3.1 exposes active devices, but no default-device setter.
+// Windows' PolicyConfig COM interface changes playback and recording defaults.
+const endpointId = flow => new RegExp(`^\\{0\\.0\\.${flow}\\.00000000\\}\\.\\{[0-9a-fA-F-]{36}\\}$`);
 const source = `using System;
 using System.Runtime.InteropServices;
 [ComImport, Guid("870af99c-171d-4f9e-af0d-e63df40c2bc9")] class PolicyConfigClient {}
@@ -35,22 +35,35 @@ public class AudioOutput {
 }`;
 const command = `$ErrorActionPreference = 'Stop'; Add-Type -TypeDefinition '${source}'; [AudioOutput]::Select('__DEVICE_ID__')`;
 
-export function outputDeviceArgs(deviceId) {
-  if (!endpointId.test(deviceId ?? '')) throw new Error('Invalid Windows playback device ID.');
+function deviceArgs(deviceId, flow) {
+  if (!endpointId(flow).test(deviceId ?? '')) {
+    throw new Error(`Invalid Windows ${flow === 0 ? 'playback' : 'recording'} device ID.`);
+  }
   return ['-NoProfile', '-NonInteractive', '-Command', command.replace('__DEVICE_ID__', deviceId)];
 }
 
-// Match the entire fixed script and only permit a playback endpoint ID as input.
-export function outputDeviceArgsRegex() {
+export const outputDeviceArgs = deviceId => deviceArgs(deviceId, 0);
+export const inputDeviceArgs = deviceId => deviceArgs(deviceId, 1);
+
+// Match the entire fixed script and only permit the corresponding endpoint ID.
+function deviceArgsRegex(flow) {
   const escape = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return '^' + escape(['-NoProfile', '-NonInteractive', '-Command', command].join(' '))
-    .replace('__DEVICE_ID__', '\\{0\\.0\\.0\\.00000000\\}\\.\\{[0-9a-fA-F-]{36}\\}') + '$';
+    .replace('__DEVICE_ID__', `\\{0\\.0\\.${flow}\\.00000000\\}\\.\\{[0-9a-fA-F-]{36}\\}`) + '$';
 }
 
-export async function selectOutputDevice(shellExec, audio, deviceId) {
-  if (!audio?.playbackDevices?.some(device => device.deviceId === deviceId)) {
-    throw new Error('Output device is no longer connected.');
+export const outputDeviceArgsRegex = () => deviceArgsRegex(0);
+export const inputDeviceArgsRegex = () => deviceArgsRegex(1);
+
+async function selectDevice(shellExec, devices, deviceId, input) {
+  if (!devices?.some(device => device.deviceId === deviceId)) {
+    throw new Error(`${input ? 'Input' : 'Output'} device is no longer connected.`);
   }
-  const result = await shellExec('powershell.exe', outputDeviceArgs(deviceId));
-  if (result.code !== 0) throw new Error(result.stderr?.trim() || 'Could not change the Windows output device.');
+  const result = await shellExec('powershell.exe', deviceArgs(deviceId, input ? 1 : 0));
+  if (result.code !== 0) throw new Error(result.stderr?.trim() || `Could not change the Windows ${input ? 'input' : 'output'} device.`);
 }
+
+export const selectOutputDevice = (shellExec, audio, deviceId) =>
+  selectDevice(shellExec, audio?.playbackDevices, deviceId, false);
+export const selectInputDevice = (shellExec, audio, deviceId) =>
+  selectDevice(shellExec, audio?.recordingDevices, deviceId, true);

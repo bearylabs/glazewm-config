@@ -281,9 +281,10 @@ html[data-popup-type='globalprotect'] .network-vpn[data-connected='false'] .netw
 .audio-device__icon { flex: 0 0 22px; width: 22px; display: grid; place-items: center; color: var(--text); }
 .audio-device__icon svg { width: 16px; height: 16px; }
 .audio-device__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-[data-muted='true'] .audio-hero .hero__icon,
-[data-muted='true'] .audio-control__row output,
-[data-muted='true'] #volume-slider { opacity: 0.5; }
+.audio-hero[data-muted='true'] .hero__icon,
+.audio-control[data-muted='true'] .audio-control__row output,
+.audio-control[data-muted='true'] input[type='range'] { opacity: 0.5; }
+.audio-input { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--audio-selected); }
 .panel .audio-status { margin: 6px 0 0; }
 html[data-popup-type='bluetooth'] body {
   border-width: 2px; border-radius: 0;

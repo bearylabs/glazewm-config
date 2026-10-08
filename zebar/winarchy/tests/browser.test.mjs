@@ -46,6 +46,11 @@ const mocks = `
   data.audio.playbackDevices = [data.audio.defaultPlaybackDevice,
     { deviceId: '{0.0.0.00000000}.{12345678-1234-1234-1234-123456789abc}', name: 'Headphones (Jabra)', volume: 27, isMuted: false },
   ];
+  data.audio.recordingDevices = [
+    { deviceId: '{0.0.1.00000000}.{12345678-1234-1234-1234-123456789abc}', name: 'Microphone', volume: 35, isMuted: false },
+    { deviceId: '{0.0.1.00000000}.{12345678-1234-1234-1234-123456789abd}', name: 'Headset microphone', volume: 55, isMuted: false },
+  ];
+  data.audio.defaultRecordingDevice = data.audio.recordingDevices[0];
   const calls = [];
   const errors = {};
   const notify = () => {
@@ -64,12 +69,12 @@ const mocks = `
   data.audio.setVolume = async (volume, options) => {
     if (window.__test.failAudio) throw new Error('Volume command failed');
     calls.push(['volume', volume, options]);
-    data.audio.defaultPlaybackDevice.volume = volume;
+    [...data.audio.playbackDevices, ...data.audio.recordingDevices].find(device => device.deviceId === options.deviceId).volume = volume;
     notify();
   };
   data.audio.setMute = async (muted, options) => {
     calls.push(['mute', muted, options]);
-    data.audio.defaultPlaybackDevice.isMuted = muted;
+    [...data.audio.playbackDevices, ...data.audio.recordingDevices].find(device => device.deviceId === options.deviceId).isMuted = muted;
     notify();
   };
   export function currentWidget() {
@@ -159,13 +164,53 @@ const mocks = `
     return { processId: 123 };
   }
   export async function shellExec(program, args) {
+    if (program === 'powershell.exe' && args[3]?.includes('$nightLightAction')) {
+      const action = args[3].match(/\\$nightLightAction = '([^']+)'/)[1];
+      window.__test.nightLight ??= { available: true, enabled: false };
+      if (action === 'toggle') {
+        calls.push(['night-light', action]);
+        if (window.__test.failNightLight) return { code: 1, stderr: 'Night light access denied' };
+        if (window.__test.holdNightLight) await new Promise(resolve => { window.__test.resolveNightLight = resolve; });
+        window.__test.nightLight.enabled = !window.__test.nightLight.enabled;
+      }
+      if (window.__test.failNightLightStatus) return { code: 1, stderr: 'Night light status unavailable' };
+      return { code: 0, stdout: JSON.stringify(window.__test.nightLight) };
+    }
+    if (program === 'powershell.exe' && args[3]?.includes('$dndAction')) {
+      const action = args[3].match(/\\$dndAction = '([^']+)'/)[1];
+      window.__test.dnd ??= { available: true, enabled: false, profile: 'Microsoft.QuietHoursProfile.Unrestricted' };
+      if (action === 'toggle') {
+        calls.push(['dnd', action]);
+        if (window.__test.failDnd) return { code: 1, stderr: 'DND access denied' };
+        if (window.__test.holdDnd) await new Promise(resolve => { window.__test.resolveDnd = resolve; });
+        const enabled = !window.__test.dnd.enabled;
+        window.__test.dnd = { available: true, enabled,
+          profile: 'Microsoft.QuietHoursProfile.' + (enabled ? 'PriorityOnly' : 'Unrestricted') };
+      }
+      if (window.__test.failDndStatus) return { code: 1, stderr: 'DND status unavailable' };
+      return { code: 0, stdout: JSON.stringify(window.__test.dnd) };
+    }
+    if (program === 'powershell.exe' && args[3]?.includes('$awakeAction')) {
+      const action = args[3].match(/\\$awakeAction = '([^']+)'/)[1];
+      window.__test.awake ??= { available: true, enabled: false };
+      if (action === 'toggle') {
+        calls.push(['awake', action]);
+        if (window.__test.failAwake) return { code: 1, stderr: 'Awake access denied' };
+        if (window.__test.holdAwake) await new Promise(resolve => { window.__test.resolveAwake = resolve; });
+        window.__test.awake.enabled = !window.__test.awake.enabled;
+      }
+      if (window.__test.failAwakeStatus) return { code: 1, stderr: 'Awake status unavailable' };
+      return { code: 0, stdout: JSON.stringify(window.__test.awake) };
+    }
     if (window.__holdNetwork && program === 'powershell.exe' && /GlobalProtectButton|GetRadiosAsync|GetIPv4Statistics/.test(args[3] ?? '')) {
       while (window.__holdNetwork) await new Promise(resolve => setTimeout(resolve, 20));
     }
     if (program === 'powershell.exe' && args[3]?.includes('[AudioOutput]::Select')) {
-      calls.push(['output-device', program, args]);
+      const input = args[3].includes('{0.0.1.00000000}');
+      calls.push([input ? 'input-device' : 'output-device', program, args]);
       if (window.__test.failDeviceSwitch) return { code: 1, stderr: 'Device switch failed' };
-      data.audio.defaultPlaybackDevice = data.audio.playbackDevices[1];
+      if (input) data.audio.defaultRecordingDevice = data.audio.recordingDevices[1];
+      else data.audio.defaultPlaybackDevice = data.audio.playbackDevices[1];
       notify();
       return { code: 0 };
     }
@@ -304,7 +349,8 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       else source = await readFile(filename, 'utf8');
       if (url.pathname === '/widgets/bar/bar.mjs') {
         source = source.replace('const powerTimer = setInterval(refreshPower, 10000);',
-          'window.__refreshPower = refreshPower; const powerTimer = setInterval(refreshPower, 10000);');
+          'window.__refreshPower = refreshPower; const powerTimer = setInterval(refreshPower, 10000);')
+          .replace('const updateBarZOrder =', 'window.__refreshAwake = awakeControl.refresh; window.__refreshDnd = dndControl.refresh; window.__refreshNightLight = nightLightControl.refresh; const updateBarZOrder =');
       }
       if (url.pathname === '/widgets/shared/battery-model.mjs') {
         source = source.replaceAll('timeout: 15000', 'timeout: window.__test.powerQueryTimeout ?? 15000');
@@ -370,6 +416,13 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
         await pause(25);
       }
       assert(ready, `${type} must initialize without module errors`);
+      if (type === 'bar') {
+        for (let attempt = 0; attempt < 100; attempt++) {
+          if (await evaluate(`['awake-trigger', 'dnd-trigger', 'night-light-trigger'].every(id =>
+            !document.getElementById(id).title.includes('checking status'))`)) break;
+          await pause(10);
+        }
+      }
       await evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
       if (type === 'audio') {
         for (let attempt = 0; attempt < 100; attempt++) {
@@ -405,6 +458,166 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert.deepEqual(result.calls.filter(call => call[0] === 'wm'), [['wm', 'focus --workspace 2']]);
       assert.equal(result.oldStats, false);
     });
+    await t.test('Awake is hover-only left of the fixed clock, toggles colors and handles failures', async () => {
+      await load('bar');
+      await evaluate('window.__refreshAwake()');
+      await client.call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 20, y: 100 });
+      const snapshot = () => evaluate(`(() => {
+        const button = document.getElementById('awake-trigger');
+        button.getAnimations().forEach(animation => animation.finish());
+        const clock = document.getElementById('calendar-trigger').getBoundingClientRect();
+        const icon = button.getBoundingClientRect();
+        const css = getComputedStyle(button);
+        return { opacity: css.opacity, events: css.pointerEvents, color: css.color,
+          pressed: button.getAttribute('aria-pressed'), muted: button.classList.contains('is-muted'),
+          disabled: button.disabled, center: clock.left + clock.width / 2,
+          iconRight: icon.right, clockLeft: clock.left };
+      })()`);
+      const idle = await snapshot();
+      assert.equal(idle.opacity, '0');
+      assert.equal(idle.events, 'none');
+      assert.equal(idle.muted, true);
+      assert(Math.abs(idle.center - 960) < 0.5);
+      assert(Math.abs(idle.iconRight - idle.clockLeft) < 0.5);
+      await client.call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 20, y: 14 });
+      assert.equal((await snapshot()).opacity, '1', 'Hover anywhere on bar reveals Awake');
+      await evaluate(`window.__test.holdAwake = true;
+        document.getElementById('awake-trigger').click();
+        document.getElementById('awake-trigger').click();`);
+      assert.equal(await evaluate("window.__test.calls.filter(call => call[0] === 'awake').length"), 1);
+      assert.equal((await snapshot()).disabled, true);
+      await evaluate(`window.__test.holdAwake = false; window.__test.resolveAwake();
+        new Promise(resolve => setTimeout(resolve, 30));`);
+      const on = await snapshot();
+      assert.equal(on.pressed, 'true');
+      assert.equal(on.muted, false);
+      assert.notEqual(on.color, idle.color);
+      assert.equal(on.center, idle.center);
+      await client.call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 20, y: 100 });
+      assert.equal((await snapshot()).opacity, '0', 'Enabled icon also disappears off bar');
+      await evaluate(`document.getElementById('awake-trigger').click();
+        new Promise(resolve => setTimeout(resolve, 30));`);
+      assert.equal((await snapshot()).pressed, 'false');
+      await evaluate(`window.__test.failAwake = true; document.getElementById('awake-trigger').click();
+        new Promise(resolve => setTimeout(resolve, 30));`);
+      assert.equal((await snapshot()).pressed, 'false');
+      assert.match(await evaluate("document.getElementById('popup-error').textContent"), /Awake access denied/);
+      assert.equal(await evaluate("document.getElementById('popup-error').hidden"), false);
+      await evaluate(`window.__test.awake = { available: true, enabled: true }; window.__refreshAwake()`);
+      assert.equal((await snapshot()).pressed, 'true', 'External PowerToys changes update icon');
+      await evaluate(`window.__test.awake = { available: false, enabled: false }; window.__refreshAwake()`);
+      assert.equal((await snapshot()).disabled, true);
+      await evaluate(`window.__test.failAwakeStatus = true; window.__refreshAwake()`);
+      assert.equal((await snapshot()).disabled, true);
+      assert.match(await evaluate("document.getElementById('popup-error').textContent"), /Awake status unavailable/);
+    });
+    await t.test('DND sits left of Awake, follows hover visibility, and toggles confirmed Windows state', async () => {
+      await load('bar');
+      const state = () => evaluate(`(() => {
+        const button = document.getElementById('dnd-trigger');
+        button.getAnimations().forEach(animation => animation.finish());
+        const css = getComputedStyle(button);
+        const clock = document.getElementById('calendar-trigger').getBoundingClientRect();
+        return { pressed: button.getAttribute('aria-pressed'), muted: button.classList.contains('is-muted'),
+          color: css.color, opacity: css.opacity, disabled: button.disabled,
+          width: getComputedStyle(button.firstChild).width, center: clock.left + clock.width / 2,
+          right: button.getBoundingClientRect().right,
+          awakeLeft: document.getElementById('awake-trigger').getBoundingClientRect().left };
+      })()`);
+      await client.call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 20, y: 100 });
+      const off = await state();
+      assert.equal(off.opacity, '0');
+      assert.equal(off.width, '10px');
+      assert.equal(off.pressed, 'false');
+      assert.equal(off.muted, true);
+      assert.equal(off.disabled, false);
+      assert(Math.abs(off.right - off.awakeLeft) < 0.5);
+      assert(Math.abs(off.center - 960) < 0.5);
+      await client.call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 20, y: 14 });
+      assert.equal((await state()).opacity, '1');
+      await evaluate(`window.__test.holdDnd = true; document.getElementById('dnd-trigger').click();
+        document.getElementById('dnd-trigger').click();`);
+      assert.equal(await evaluate("window.__test.calls.filter(call => call[0] === 'dnd').length"), 1);
+      assert.equal((await state()).disabled, true);
+      assert.equal((await state()).pressed, 'false', 'No optimistic enabled state');
+      await evaluate(`window.__test.holdDnd = false; window.__test.resolveDnd();
+        new Promise(resolve => setTimeout(resolve, 30));`);
+      const on = await state();
+      assert.equal(on.pressed, 'true');
+      assert.equal(on.muted, false);
+      assert.notEqual(on.color, off.color);
+      assert.equal(on.center, off.center);
+      await client.call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 20, y: 100 });
+      assert.equal((await state()).opacity, '0');
+      await evaluate(`document.getElementById('dnd-trigger').click();
+        new Promise(resolve => setTimeout(resolve, 30));`);
+      assert.equal((await state()).pressed, 'false');
+      await evaluate(`window.__test.failDnd = true; document.getElementById('dnd-trigger').click();
+        new Promise(resolve => setTimeout(resolve, 30));`);
+      assert.equal((await state()).pressed, 'false');
+      assert.match(await evaluate("document.getElementById('popup-error').textContent"), /DND access denied/);
+      assert.equal(await evaluate("document.getElementById('popup-error').hidden"), false);
+      await evaluate(`window.__test.dnd = { available: true, enabled: true,
+        profile: 'Microsoft.QuietHoursProfile.AlarmsOnly' }; window.__refreshDnd()`);
+      assert.equal((await state()).pressed, 'true');
+      await evaluate(`window.__test.failDndStatus = true; window.__refreshDnd()`);
+      assert.equal((await state()).disabled, true);
+      assert.match(await evaluate("document.getElementById('popup-error').textContent"), /DND status unavailable/);
+    });
+    await t.test('Night light is a small hover-only toggle left of DND without moving the clock', async () => {
+      await load('bar');
+      const state = () => evaluate(`(() => {
+        const button = document.getElementById('night-light-trigger');
+        button.getAnimations().forEach(animation => animation.finish());
+        const css = getComputedStyle(button);
+        const clock = document.getElementById('calendar-trigger').getBoundingClientRect();
+        return { pressed: button.getAttribute('aria-pressed'), muted: button.classList.contains('is-muted'),
+          color: css.color, opacity: css.opacity, disabled: button.disabled,
+          width: getComputedStyle(button.firstChild).width, center: clock.left + clock.width / 2,
+          right: button.getBoundingClientRect().right,
+          dndLeft: document.getElementById('dnd-trigger').getBoundingClientRect().left };
+      })()`);
+      await client.call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 20, y: 100 });
+      const off = await state();
+      assert.equal(off.opacity, '0');
+      assert.equal(off.width, '10px');
+      assert.equal(off.pressed, 'false');
+      assert.equal(off.muted, true);
+      assert.equal(off.disabled, false);
+      assert(Math.abs(off.right - off.dndLeft) < 0.5);
+      assert(Math.abs(off.center - 960) < 0.5);
+      await client.call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 20, y: 14 });
+      assert.equal((await state()).opacity, '1');
+      await evaluate(`window.__test.holdNightLight = true; document.getElementById('night-light-trigger').click();
+        document.getElementById('night-light-trigger').click();`);
+      assert.equal(await evaluate("window.__test.calls.filter(call => call[0] === 'night-light').length"), 1);
+      assert.equal((await state()).disabled, true);
+      assert.equal((await state()).pressed, 'false');
+      await evaluate(`window.__test.holdNightLight = false; window.__test.resolveNightLight();
+        new Promise(resolve => setTimeout(resolve, 30));`);
+      const on = await state();
+      assert.equal(on.pressed, 'true');
+      assert.equal(on.muted, false);
+      assert.notEqual(on.color, off.color);
+      assert.equal(on.center, off.center);
+      await client.call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 20, y: 100 });
+      assert.equal((await state()).opacity, '0');
+      await evaluate(`document.getElementById('night-light-trigger').click();
+        new Promise(resolve => setTimeout(resolve, 30));`);
+      assert.equal((await state()).pressed, 'false');
+      await evaluate(`window.__test.failNightLight = true; document.getElementById('night-light-trigger').click();
+        new Promise(resolve => setTimeout(resolve, 30));`);
+      assert.equal((await state()).pressed, 'false');
+      assert.match(await evaluate("document.getElementById('popup-error').textContent"), /Night light access denied/);
+      assert.equal(await evaluate("document.getElementById('popup-error').hidden"), false);
+      await evaluate(`window.__test.nightLight = { available: true, enabled: true }; window.__refreshNightLight()`);
+      assert.equal((await state()).pressed, 'true');
+      await evaluate(`window.__test.nightLight = { available: false, enabled: false }; window.__refreshNightLight()`);
+      assert.equal((await state()).disabled, true);
+      await evaluate(`window.__test.failNightLightStatus = true; window.__refreshNightLight()`);
+      assert.equal((await state()).disabled, true);
+      assert.match(await evaluate("document.getElementById('popup-error').textContent"), /Night light status unavailable/);
+    });
     await t.test('GlobalProtect is the first right icon, installed-only and muted when disconnected', async () => {
       await load('bar');
       assert.equal(await evaluate("document.querySelector('.zone--right button').id"), 'globalprotect-trigger');
@@ -424,10 +637,15 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert.equal(await evaluate("getComputedStyle(document.getElementById('globalprotect-trigger')).color === getComputedStyle(document.getElementById('display-trigger')).color"), true);
     });
     await t.test('native VPN status restores the icon and never recolors the Network icon', async () => {
-      await evaluate(`localStorage.setItem('winarchy.network.vpn.v1', JSON.stringify({
+      await evaluate(`localStorage.removeItem('winarchy.network.poller.v1');
+        localStorage.setItem('winarchy.network.vpn.v1', JSON.stringify({
         time: Date.now(), value: { available: false, connected: false },
       }));`);
       await load('bar');
+      for (let attempt = 0; attempt < 100; attempt++) {
+        if (await evaluate("!document.getElementById('globalprotect-trigger').hidden")) break;
+        await pause(10);
+      }
       assert.equal(await evaluate("document.getElementById('globalprotect-trigger').hidden"), false,
         'Successful native code:0 status must show the installed VPN client.');
       const color = await evaluate(`(() => {
@@ -465,7 +683,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
     await t.test('center and right triggers only underline while their popup is open', async () => {
       await load('bar');
       const results = await evaluate(`(() => {
-        return [...document.querySelectorAll('.zone--center button, .zone--right button')].map(node => {
+        return [...document.querySelectorAll('[data-popup-trigger]')].map(node => {
           const originalColor = getComputedStyle(node).color;
           node.classList.add('is-hovered');
           const hover = getComputedStyle(node);
@@ -494,9 +712,10 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       await load('bar');
       assert(await evaluate(`(() => {
         const icons = [...document.querySelectorAll('.status svg, .split svg')];
-        return icons.length === 11 && icons.every(icon =>
+        return icons.length === 14 && icons.every(icon =>
           icon.getAttribute('fill') === 'currentColor' && !icon.hasAttribute('stroke') &&
-          icon.getAttribute('aria-hidden') === 'true' && getComputedStyle(icon).width === '16px');
+          icon.getAttribute('aria-hidden') === 'true' &&
+          getComputedStyle(icon).width === (icon.closest('.status--indicator') ? '10px' : '16px'));
       })()`));
       await evaluate('window.__test.data.audio.defaultPlaybackDevice.isMuted = true; window.__test.notify()');
       assert(await evaluate(`getComputedStyle(document.querySelector('.vol__muted')).display !== 'none' &&
@@ -518,6 +737,9 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
         window.__test.notify();
         window.__test.notify();
         await window.__refreshPower();
+        await window.__refreshAwake();
+        await window.__refreshDnd();
+        await window.__refreshNightLight();
         await new Promise(resolve => setTimeout(resolve, 0));
         observer.disconnect();
         return changes;
@@ -527,7 +749,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert.match(await evaluate("document.getElementById('audio-trigger').getAttribute('aria-label')"), /43%/);
       assert.deepEqual(await evaluate(`[
         ...document.querySelectorAll('.zone--center [title], .zone--right [title]')
-      ].map(node => node.id)`), ['globalprotect-trigger']);
+      ].map(node => node.id)`), ['night-light-trigger', 'dnd-trigger', 'awake-trigger', 'globalprotect-trigger']);
     });
     await t.test('battery icon shows AC, low, mid, full and unavailable status', async () => {
       await load('bar');
@@ -865,7 +1087,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
     });
     await t.test('output devices switch Windows defaults and follow external changes and hotplug', async () => {
       await load('audio');
-      assert.equal(await evaluate("document.querySelectorAll('.audio-device').length"), 2);
+      assert.equal(await evaluate("document.querySelectorAll('#audio-devices .audio-device').length"), 2);
       assert.equal(await evaluate("document.querySelector('.audio-device[aria-pressed=true]').textContent"), 'Speakers');
       assert.equal(await evaluate("document.getElementById('audio-devices').hidden"), false);
       await click('Headphones (Jabra)');
@@ -885,11 +1107,50 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert.match(await evaluate("document.getElementById('popup-error').textContent"), /Device switch failed/);
       assert.equal(await evaluate("document.querySelector('.audio-device[aria-pressed=true] .audio-device__name').textContent"), 'Speakers');
       await evaluate('window.__test.data.audio.playbackDevices.pop(); window.__test.notify()');
-      assert.equal(await evaluate("document.querySelectorAll('.audio-device').length"), 1);
+      assert.equal(await evaluate("document.querySelectorAll('#audio-devices .audio-device').length"), 1);
       await evaluate('window.__test.data.audio.playbackDevices = []; window.__test.data.audio.defaultPlaybackDevice = null; window.__test.notify()');
-      assert.equal(await evaluate("document.querySelectorAll('.audio-device').length"), 0);
+      assert.equal(await evaluate("document.querySelectorAll('#audio-devices .audio-device').length"), 0);
       assert(await evaluate("document.getElementById('audio-mute').disabled"));
       assert.match(await evaluate("document.querySelector('.audio-status').textContent"), /No default output device/);
+    });
+    await t.test('input controls match output below it and independently follow recording defaults', async () => {
+      await load('audio');
+      assert.equal(await evaluate("document.querySelectorAll('#system-content .audio-switch').length"), 1);
+      assert.equal(await evaluate("document.querySelector('.audio-input .hero, .audio-input .audio-switch, .audio-input .audio-separator')"), null);
+      assert.deepEqual(await evaluate("[...document.querySelector('.audio-input').children].map(node => node.className)"),
+        ['audio-control', 'audio-devices', 'note audio-status']);
+      assert.equal(await evaluate("document.getElementById('input-volume-slider').value"), '35');
+      assert.equal(await evaluate("document.querySelectorAll('#audio-input-devices .audio-device').length"), 2);
+      assert(await evaluate(`document.getElementById('audio-devices').getBoundingClientRect().bottom <
+        document.getElementById('input-volume-slider').getBoundingClientRect().top`));
+      await evaluate(`const slider = document.getElementById('input-volume-slider');
+        slider.value = 76; slider.dispatchEvent(new Event('input'))`);
+      await pause(50);
+      assert.deepEqual(await evaluate('window.__test.calls[0]'), [
+        'volume', 76, { deviceId: '{0.0.1.00000000}.{12345678-1234-1234-1234-123456789abc}' },
+      ]);
+      assert.equal(await evaluate("document.getElementById('volume-slider').value"), '42');
+      await evaluate("window.__test.data.audio.defaultRecordingDevice.isMuted = true; window.__test.notify()");
+      assert.equal(await evaluate("document.getElementById('audio-mute').getAttribute('aria-checked')"), 'true');
+      assert.equal(await evaluate("getComputedStyle(document.getElementById('volume-slider')).opacity"), '1');
+      assert.equal(await evaluate("getComputedStyle(document.getElementById('input-volume-slider')).opacity"), '0.5');
+      await click('Headset microphone');
+      await pause(50);
+      assert.equal(await evaluate("document.getElementById('input-volume-slider').value"), '55');
+      assert.equal(await evaluate("document.querySelector('#audio-input-devices [aria-pressed=true]').textContent"), 'Headset microphone');
+      assert.equal(await evaluate("window.__test.calls.at(-1)[0]"), 'input-device');
+      await evaluate(`window.__test.data.audio.defaultRecordingDevice.volume = 23; window.__test.notify()`);
+      assert.equal(await evaluate("document.getElementById('input-volume-slider').value"), '23');
+      await evaluate(`window.__test.failDeviceSwitch = true;
+        document.querySelector('#audio-input-devices .audio-device').click()`);
+      await pause(50);
+      assert.match(await evaluate("document.getElementById('popup-error').textContent"), /Device switch failed/);
+      await evaluate(`window.__test.data.audio.recordingDevices = [];
+        window.__test.data.audio.defaultRecordingDevice = null; window.__test.notify()`);
+      assert(await evaluate("document.getElementById('input-volume-slider').disabled"));
+      assert.equal(await evaluate("document.querySelectorAll('#audio-input-devices .audio-device').length"), 0);
+      assert.match(await evaluate("document.querySelector('.audio-input .audio-status').textContent"), /No default input device/);
+      assert.equal(await evaluate("document.getElementById('volume-slider').disabled"), false);
     });
     await t.test('network uses Omarchy hero and flat details without fabricated controls or metrics', async () => {
       await load('network');

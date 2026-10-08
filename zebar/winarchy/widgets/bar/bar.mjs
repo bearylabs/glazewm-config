@@ -8,6 +8,10 @@ import { createBarZOrder } from '../shared/bar-z-order.mjs';
 import { createAudioOwner } from '../shared/audio-bridge.mjs';
 import { readSnapshot, vpnSnapshotValid } from '../shared/snapshot-cache.mjs';
 import { shellQuery } from '../shared/native-query.mjs';
+import { queryAwake, toggleAwake } from '../shared/awake-model.mjs';
+import { queryDnd, toggleDnd } from '../shared/dnd-model.mjs';
+import { queryNightLight, toggleNightLight } from '../shared/night-light-model.mjs';
+import { attachBarToggle } from '../shared/bar-toggle.mjs';
 
 for (const [id, icons] of Object.entries({
   split: [['split-horizontal', 'split__horizontal'], ['split-vertical', 'split__vertical']],
@@ -16,6 +20,9 @@ for (const [id, icons] of Object.entries({
   'globalprotect-trigger': [['globalprotect', '']],
   'audio-trigger': [['volume-high', 'vol__on'], ['volume-off', 'vol__muted']],
   'display-trigger': [['monitor', '']],
+  'awake-trigger': [['coffee', '']],
+  'dnd-trigger': [['bell-off', '']],
+  'night-light-trigger': [['weather-night', '']],
 })) {
   document.getElementById(id).replaceChildren(...icons.map(([name, className]) => createIcon(name, className)));
 }
@@ -47,6 +54,36 @@ function reportPopupError(error) {
   popupErrorEl.hidden = false;
 }
 popupErrorEl.addEventListener('click', () => { popupErrorEl.hidden = true; });
+const toggleOptions = {
+  setTitle, reportError: reportPopupError,
+  clearError: () => { popupErrorEl.hidden = true; },
+};
+const awakeControl = attachBarToggle(document.getElementById('awake-trigger'), {
+  ...toggleOptions,
+  query: () => queryAwake(shellQuery),
+  toggle: () => toggleAwake(zebar.shellExec),
+  label: state => !state ? 'PowerToys Awake -- status unavailable'
+    : !state.available ? 'Enable Awake in PowerToys Settings first'
+    : state.enabled ? 'PowerToys Awake -- on. Allow sleep'
+    : 'PowerToys Awake -- off. Stay Awake',
+});
+const dndControl = attachBarToggle(document.getElementById('dnd-trigger'), {
+  ...toggleOptions,
+  query: () => queryDnd(shellQuery),
+  toggle: () => toggleDnd(zebar.shellExec),
+  label: state => !state ? 'Windows Do not disturb -- status unavailable'
+    : state.enabled ? 'Windows Do not disturb -- on. Allow notifications'
+    : 'Windows Do not disturb -- off. Silence notifications',
+});
+const nightLightControl = attachBarToggle(document.getElementById('night-light-trigger'), {
+  ...toggleOptions,
+  query: () => queryNightLight(shellQuery),
+  toggle: () => toggleNightLight(zebar.shellExec),
+  label: state => !state ? 'Windows Night light -- status unavailable'
+    : !state.available ? 'Windows Night light -- unavailable. Check Windows display settings'
+    : state.enabled ? 'Windows Night light -- on. Turn off'
+    : 'Windows Night light -- off. Turn on',
+});
 const updateBarZOrder = createBarZOrder(
   order => zebar.currentWidget().setZOrder(order), reportPopupError,
 );

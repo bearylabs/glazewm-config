@@ -14,6 +14,15 @@
       <div class="modes" id="modes"></div>
     </div>
     <div class="zone zone--center">
+      <button class="status status--indicator status--night-light is-muted" id="night-light-trigger" type="button" disabled
+              title="Windows Night light -- checking status" aria-label="Windows Night light -- checking status"
+              aria-pressed="false"></button>
+      <button class="status status--indicator status--dnd is-muted" id="dnd-trigger" type="button" disabled
+              title="Windows Do not disturb -- checking status" aria-label="Windows Do not disturb -- checking status"
+              aria-pressed="false"></button>
+      <button class="status status--indicator status--awake is-muted" id="awake-trigger" type="button" disabled
+              title="PowerToys Awake -- checking status" aria-label="PowerToys Awake -- checking status"
+              aria-pressed="false"></button>
       <button class="clock" id="calendar-trigger" type="button" aria-label="Open calendar"
               aria-haspopup="dialog" aria-expanded="false" data-popup-trigger="calendar">
         <span id="time">--:--</span>

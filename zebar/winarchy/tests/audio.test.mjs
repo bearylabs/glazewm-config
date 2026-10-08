@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { outputVolumeName, outputDeviceArgs, outputDeviceArgsRegex, selectOutputDevice } from '../widgets/shared/audio-model.mjs';
+import { outputVolumeName, outputDeviceArgs, outputDeviceArgsRegex, selectOutputDevice,
+  inputDeviceArgs, inputDeviceArgsRegex, selectInputDevice } from '../widgets/shared/audio-model.mjs';
 
 test('hero status matches Omarchy volume bands and muted state', () => {
   for (const [volume, expected] of [
@@ -36,4 +37,29 @@ test('selection rechecks connected devices, sends the endpoint ID and surfaces n
   assert.deepEqual(calls, [['powershell.exe', outputDeviceArgs(id)]]);
   await assert.rejects(selectOutputDevice(() => assert.fail('Must not execute'), { playbackDevices: [] }, id), /no longer connected/);
   await assert.rejects(selectOutputDevice(async () => ({ code: 1, stderr: 'Access denied' }), audio, id), /Access denied/);
+});
+
+const inputId = id.replace('0.0.0.', '0.0.1.');
+
+test('input selection permits only the fixed recording-endpoint command', () => {
+  const args = inputDeviceArgs(inputId);
+  const permitted = new RegExp(inputDeviceArgsRegex());
+  assert(permitted.test(args.join(' ')));
+  assert(!permitted.test(args.join(' ') + '; Get-Process'));
+  assert(!permitted.test(args.join(' ').replace('role < 3', 'role < 4')));
+  assert(!permitted.test(outputDeviceArgs(id).join(' ')));
+  assert(!new RegExp(outputDeviceArgsRegex()).test(args.join(' ')));
+  for (const value of ['', 'microphone', id, inputId + "'); Get-Process; ('"]) {
+    assert.throws(() => inputDeviceArgs(value), /Invalid Windows recording device ID/);
+  }
+});
+
+test('input selection rechecks recording devices and surfaces native failures', async () => {
+  const calls = [];
+  const recording = { recordingDevices: [{ deviceId: inputId }] };
+  await selectInputDevice(async (...args) => { calls.push(args); return { code: 0 }; }, recording, inputId);
+  assert.deepEqual(calls, [['powershell.exe', inputDeviceArgs(inputId)]]);
+  await assert.rejects(selectInputDevice(() => assert.fail('Must not execute'), audio, inputId), /Input device is no longer connected/);
+  await assert.rejects(selectInputDevice(async () => ({ code: 1, stderr: 'Access denied' }), recording, inputId), /Access denied/);
+  await assert.rejects(selectInputDevice(async () => ({ code: 1 }), recording, inputId), /Could not change the Windows input device/);
 });

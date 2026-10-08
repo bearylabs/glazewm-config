@@ -1,5 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises';
-import { outputDeviceArgsRegex } from '../zebar/winarchy/widgets/shared/audio-model.mjs';
+import { outputDeviceArgsRegex, inputDeviceArgsRegex } from '../zebar/winarchy/widgets/shared/audio-model.mjs';
 import { powerStatusArgs, batteryCapacityArgsRegex } from '../zebar/winarchy/widgets/shared/battery-model.mjs';
 import { bluetoothArgsRegex, bluetoothSettingsPermission } from '../zebar/winarchy/widgets/shared/bluetooth-model.mjs';
 import { bluetoothBackgroundPermission } from '../zebar/winarchy/widgets/shared/bluetooth-background.mjs';
@@ -8,6 +8,9 @@ import { networkBackgroundPermissions } from '../zebar/winarchy/widgets/shared/n
 import { networkStatsArgsRegex } from '../zebar/winarchy/widgets/shared/network-stats.mjs';
 import { outsideClickArgsRegex } from '../zebar/winarchy/widgets/shared/popup-dismissal.mjs';
 import { wifiSettingsPermission } from '../zebar/winarchy/widgets/shared/wifi-settings.mjs';
+import { awakePermissions } from '../zebar/winarchy/widgets/shared/awake-model.mjs';
+import { dndPermissions } from '../zebar/winarchy/widgets/shared/dnd-model.mjs';
+import { nightLightPermissions } from '../zebar/winarchy/widgets/shared/night-light-model.mjs';
 
 const flags = process.argv.slice(2);
 if (flags.some(flag => flag !== '--check') || flags.length > 1) {
@@ -20,9 +23,13 @@ const permissions = {
     powershell(outsideClickArgsRegex()),
     ...networkBackgroundPermissions,
     bluetoothBackgroundPermission,
+    ...awakePermissions,
+    ...dndPermissions,
+    ...nightLightPermissions,
   ],
   popup: [
     powershell(outputDeviceArgsRegex()),
+    powershell(inputDeviceArgsRegex()),
     powershell(bluetoothArgsRegex()),
     bluetoothSettingsPermission,
     powershell(globalProtectArgsRegex()),
