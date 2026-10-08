@@ -29,6 +29,9 @@ async function fixture() {
   let holdStatus = false;
   let completeStatus;
   let connected = false;
+  let holdAction = false;
+  let completeAction;
+  let actionError = false;
   const query = async () => {
     if (holdStatus) await new Promise(resolve => { completeStatus = resolve; });
     if (statusError) throw new Error('Status unavailable');
@@ -39,6 +42,8 @@ async function fixture() {
       shellExec: async (_program, args) => {
         const action = args[3].match(/\$action = '([^']+)'/)[1];
         actions.push(action);
+        if (holdAction) await new Promise(resolve => { completeAction = resolve; });
+        if (actionError) throw new Error('Native action failed');
         return { code: 0, stdout: JSON.stringify({ requested: action }) };
       },
     },
@@ -61,6 +66,7 @@ async function fixture() {
     clearTimeout: callback => timers.delete(callback),
     setInterval: callback => { tick = callback; return 1; },
     clearInterval() {},
+    console,
   });
   const module = new vm.SourceTextModule(await readFile(
     new URL('../widgets/popup/globalprotect.mjs', import.meta.url), 'utf8',
@@ -72,28 +78,39 @@ async function fixture() {
     }, { context });
   });
   await module.evaluate();
-  const root = new Element();
-  module.namespace.renderGlobalProtect(root, error => failures.push(error.message));
-  await settle();
-  const section = root.children[0];
-  const toggle = section.children[0].children[2].children[1];
+  let section;
+  let toggle;
+  async function mount() {
+    const root = new Element();
+    module.namespace.renderGlobalProtect(root, error => failures.push(error.message));
+    await settle();
+    section = root.children[0];
+    toggle = section.children[0].children[2].children[1];
+  }
+  await mount();
   return {
-    timers, failures, actions, section, toggle,
+    timers, failures, actions,
+    get section() { return section; },
+    get toggle() { return toggle; },
     get retained() { return retained; },
     set statusError(value) { statusError = value; },
     set holdStatus(value) { holdStatus = value; },
     set connected(value) { connected = value; },
+    set holdAction(value) { holdAction = value; },
+    set actionError(value) { actionError = value; },
     async connect() { toggle.listeners.click(); await settle(); },
     async refresh() { tick(); await settle(); },
     expire() {
       for (const [callback, delay] of [...timers]) {
-        assert.equal(delay, 120000);
+        assert(delay >= 0 && delay <= 120000);
         timers.delete(callback);
         callback();
       }
     },
     stop() { cleanup(); },
     async finishStatus() { holdStatus = false; completeStatus(); await settle(); },
+    async finishAction() { holdAction = false; completeAction(); await settle(); },
+    async reopen() { cleanup(); await mount(); },
   };
 }
 
@@ -111,6 +128,57 @@ test('VPN deadline ends pending operations even when every status query fails', 
   await env.refresh();
   assert.equal(env.toggle.disabled, false);
   assert.deepEqual(env.actions, ['connect'], 'Timeout never retries the VPN action.');
+  env.stop();
+});
+
+test('VPN deadline covers a stalled action and forbids retries until native completion', async () => {
+  const env = await fixture();
+  env.holdAction = true;
+  await env.connect();
+  assert.equal(env.timers.size, 1);
+  env.expire();
+  await settle();
+  assert.equal(env.retained, false);
+  assert.equal(env.section.attributes['aria-busy'], 'false');
+  assert.match(env.failures[0], /outcome is unknown/);
+  await env.connect();
+  assert.deepEqual(env.actions, ['connect'], 'An unresolved native action cannot be retried.');
+  env.connected = true;
+  await env.finishAction();
+  await env.refresh();
+  assert.equal(env.toggle.disabled, false);
+  assert.deepEqual(env.actions, ['connect'], 'Late acceptance cannot restart pending state or hide the client.');
+  assert.equal(env.timers.size, 0);
+  env.stop();
+});
+
+test('closing a session during a native action clears its timer and ignores late acceptance', async () => {
+  const env = await fixture();
+  env.holdAction = true;
+  await env.connect();
+  env.stop();
+  assert.equal(env.timers.size, 0);
+  assert.equal(env.retained, false);
+  await env.finishAction();
+  assert.equal(env.timers.size, 0);
+  assert.deepEqual(env.failures, []);
+  assert.deepEqual(env.actions, ['connect']);
+});
+
+test('reopening the VPN popup cannot duplicate an unresolved action from the previous session', async () => {
+  const env = await fixture();
+  env.holdAction = true;
+  await env.connect();
+  await env.reopen();
+  assert.equal(env.toggle.disabled, true);
+  assert.match(env.section.children[1].textContent, /previous native action/);
+  await env.connect();
+  assert.deepEqual(env.actions, ['connect']);
+  await env.finishAction();
+  await env.refresh();
+  assert.equal(env.toggle.disabled, false);
+  assert.equal(env.timers.size, 0);
+  assert.deepEqual(env.failures, []);
   env.stop();
 });
 

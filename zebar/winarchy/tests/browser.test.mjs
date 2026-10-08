@@ -31,6 +31,7 @@ const mocks = `
       defaultGateway: { ssid: '<script>bad</script>', signalStrength: 75 },
       interfaces: [{
         name: 'Wi-Fi', type: 'wifi', friendlyName: 'Wireless',
+        macAddress: '00:11:22:33:44:55',
         ipv4Addresses: ['192.168.1.2/24'], ipv6Addresses: ['fe80::1234'], receiveSpeed: 1e9,
       }],
     },
@@ -133,6 +134,7 @@ const mocks = `
       queryProcesses.set(pid, process);
       setTimeout(async () => {
         if (window.__test.holdNetworkStats && args[3]?.includes('GetIPv4Statistics')) return;
+        if (window.__test.holdBatteryCapacity && args[3]?.includes('BatteryFullChargedCapacity')) return;
         try {
           const result = await shellExec(program, args);
           if (process.done) return;
@@ -176,7 +178,10 @@ const mocks = `
     }
     if (program === 'powershell.exe' && args[3]?.includes('$nic.GetIPv4Statistics()')) {
       if (window.__test.failNetworkStats) return { code: 1, stderr: 'Network statistics unavailable' };
-      return { code: 0, stdout: JSON.stringify(window.__test.networkStats ?? { id: 'wifi', received: 1410000000, sent: 353000000, gateway: '192.168.1.1', ping: 31 }) };
+      const snapshot = { id: 'wifi', macAddress: '001122334455', ipv4Addresses: ['192.168.1.2'],
+        ssid: '<script>bad</script>', received: 1410000000, sent: 353000000, gateway: '192.168.1.1', ping: 31,
+        ...window.__test.networkStats };
+      return { code: 0, stdout: JSON.stringify(window.__test.networkSnapshots ?? [snapshot]) };
     }
     if (program === 'powershell.exe' && args[3]?.includes('class BluetoothMenu')) {
       calls.push(['bluetooth', program, args]);
@@ -195,9 +200,8 @@ const mocks = `
         ],
       }) };
     }
-    if (program === 'powershell.exe' && args[3]?.includes('BatteryFullChargedCapacity')) return {
-      code: 0, stdout: '38000', stderr: '',
-    };
+    if (program === 'powershell.exe' && args[3]?.includes('BatteryFullChargedCapacity')) return window.__test.failBatteryCapacity
+      ? { code: 1, stderr: 'Capacity access denied' } : { code: 0, stdout: '38000', stderr: '' };
     if (program === 'powershell.exe') return {
       code: 0, stdout: JSON.stringify(window.__test.powerStatus ?? { ac: 'Online', charge: 0.8, battery: 'High' }),
     };
@@ -301,6 +305,9 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       if (url.pathname === '/widgets/bar/bar.mjs') {
         source = source.replace('const powerTimer = setInterval(refreshPower, 10000);',
           'window.__refreshPower = refreshPower; const powerTimer = setInterval(refreshPower, 10000);');
+      }
+      if (url.pathname === '/widgets/shared/battery-model.mjs') {
+        source = source.replaceAll('timeout: 15000', 'timeout: window.__test.powerQueryTimeout ?? 15000');
       }
       if (url.pathname === '/widgets/popup/globalprotect.mjs') {
         source = source.replace('const interval = setInterval', 'window.__refreshGlobalProtect = refresh; const interval = setInterval');
@@ -935,7 +942,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       await pause(20);
       assert.deepEqual(await evaluate('window.__copiedAddresses'), ['192.168.1.2', '192.168.1.1']);
       if (process.env.NETWORK_SCREENSHOT_PATH) {
-        await evaluate(`window.__test.data.network.defaultGateway.ssid = 'Office Wi-Fi'; window.__test.notify()`);
+        await evaluate(`window.__test.networkStats = { ssid: 'Office Wi-Fi' }; window.__refreshNetworkStats()`);
         await pause(50);
         const height = await evaluate('window.__popupHeights.at(-1)');
         const { data } = await client.call('Page.captureScreenshot', {
@@ -994,6 +1001,31 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
         window.__flyoutButton.focus(); window.__test.notify();`);
       assert(await evaluate('document.activeElement === window.__flyoutButton && window.__flyoutButton.isConnected'));
     });
+    await t.test('multiple Wi-Fi adapters never mix SSID, gateway and counters with another interface', async () => {
+      await load('network');
+      await evaluate(`window.__test.networkSnapshots = [
+        { id: 'other', macAddress: 'AABBCCDDEEFF', ipv4Addresses: ['10.0.0.2'], ssid: 'Wrong Wi-Fi',
+          received: 1234, sent: 500, gateway: '10.0.0.1', ping: 99 },
+        { id: 'wifi', macAddress: '001122334455', ipv4Addresses: ['192.168.1.2'], ssid: 'Selected Wi-Fi',
+          received: 1024, sent: 512, gateway: '192.168.1.1', ping: 2 }
+      ]; window.__refreshNetworkStats()`);
+      assert.equal(await evaluate("document.getElementById('network-title').textContent"), 'Selected Wi-Fi');
+      const entries = await evaluate("Object.fromEntries([...document.querySelectorAll('.network-traffic dt')].map(node => [node.textContent, node.nextElementSibling.textContent]))");
+      assert.equal(entries.Gateway, '192.168.1.1');
+      assert.equal(entries['IP Address'], '192.168.1.2');
+      assert.equal(entries.Downloaded, '1.0 KB');
+      await evaluate(`window.__test.data.network.interfaces[0].macAddress = 'aa:bb:cc:dd:ee:ff';
+        window.__test.data.network.interfaces[0].ipv4Addresses = ['10.0.0.2'];
+        window.__test.notify()`);
+      assert.equal(await evaluate("document.getElementById('network-title').textContent"), 'Wireless',
+        'An interface switch immediately removes the previous SSID.');
+      assert.equal(await evaluate("[...document.querySelectorAll('.network-traffic dt')].find(node => node.textContent === 'Gateway').nextElementSibling.textContent"), '--');
+      await evaluate('window.__refreshNetworkStats()');
+      assert.equal(await evaluate("document.getElementById('network-title').textContent"), 'Wrong Wi-Fi');
+      assert.equal(await evaluate("[...document.querySelectorAll('.network-traffic dt')].find(node => node.textContent === 'IP Address').nextElementSibling.textContent"), '10.0.0.2');
+      assert.equal(await evaluate("[...document.querySelectorAll('.network-traffic dt')].find(node => node.textContent === 'Receiving').nextElementSibling.textContent"), '--',
+        'A new interface starts a fresh rate baseline.');
+    });
     await t.test('network statistics timeout kills the native query and permits recovery', async () => {
       await load('network');
       await evaluate('window.__refreshNetworkStats()');
@@ -1012,7 +1044,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert.match(await evaluate("document.querySelector('.network-traffic [role=status]').textContent"), /statistics unavailable/);
       assert.equal(await evaluate("document.querySelector('.network-traffic [role=status]').hidden"), false);
       assert.equal(await evaluate("document.querySelector('.network-traffic').textContent.includes('31 ms')"), false);
-      assert.equal(await evaluate("localStorage.getItem('winarchy.network.traffic.v1')"), null);
+      assert.equal(await evaluate("localStorage.getItem('winarchy.network.traffic.v2')"), null);
       await evaluate('window.__test.failNetworkStats = false; window.__refreshNetworkStats()');
       assert.equal(await evaluate("document.querySelector('.network-traffic [role=status]').hidden"), true);
       assert.match(await evaluate("document.querySelector('.network-traffic').textContent"), /31 ms/);
@@ -1327,6 +1359,23 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       })()`);
       assert(overflow.body <= overflow.height && overflow.scroll === 0 && overflow.width <= overflow.clientWidth,
         JSON.stringify(overflow));
+    });
+    await t.test('battery capacity failures and stalled reads are visible and recover on reopening', async () => {
+      await load('power');
+      await evaluate(`window.__test.failBatteryCapacity = true; window.__reopenPopup('power')`);
+      await pause(50);
+      assert.match(await evaluate("document.getElementById('system-content').textContent"), /Capacity access denied/);
+      await evaluate(`window.__test.failBatteryCapacity = false; window.__test.holdBatteryCapacity = true;
+        window.__test.powerQueryTimeout = 20; window.__reopenPopup('power')`);
+      await pause(80);
+      assert.match(await evaluate("document.getElementById('system-content').textContent"), /Battery capacity query timed out/);
+      assert.equal(await evaluate('window.__test.queryKills'), 1);
+      await evaluate(`window.__test.holdBatteryCapacity = false; window.__test.powerQueryTimeout = 15000;
+        window.__test.data.battery = { chargePercent: 50, isCharging: false };
+        window.__reopenPopup('power')`);
+      await pause(50);
+      assert.equal(await evaluate("document.querySelector('.power-stats .error')"), null);
+      assert.equal(await evaluate("document.querySelector('.power-details dd').textContent"), '38Wh');
     });
     await t.test('battery popup excludes system details and session actions', async () => {
       await load('power');

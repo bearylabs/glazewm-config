@@ -1,7 +1,7 @@
-import * as zebar from 'https://esm.sh/zebar@3.3.1';
 import { createBatteryIcon } from '../shared/icons.mjs';
 import { percent } from '../shared/system-model.mjs';
-import { batteryDetails, batteryCapacityArgs } from '../shared/battery-model.mjs';
+import { batteryDetails, queryBatteryCapacity } from '../shared/battery-model.mjs';
+import { shellQuery } from '../shared/native-query.mjs';
 import { onPopupSessionEnd } from '../shared/popup-session.mjs';
 import { element, hero, unavailable } from './dom.mjs';
 import { subscribe } from './providers.mjs';
@@ -28,14 +28,18 @@ export function renderPower(root) {
   const stats = element('div', undefined, 'power-stats');
   root.append(stats);
   let capacity = null;
+  let capacityError = null;
   let disposed = false;
   onPopupSessionEnd(() => { disposed = true; });
-  void zebar.shellExec('powershell.exe', batteryCapacityArgs).then(result => {
-    if (disposed || result.code !== 0) return;
-    const value = JSON.parse(result.stdout);
-    capacity = Number.isFinite(value) && value > 0 ? value / 1000 : null;
+  void queryBatteryCapacity(shellQuery).then(value => {
+    if (disposed) return;
+    capacity = value;
     update(group.outputMap, group.errorMap);
-  }).catch(() => {}); // Unsupported firmware/WMI data remains unavailable.
+  }).catch(error => {
+    if (disposed) return;
+    capacityError = error.message ?? String(error);
+    update(group.outputMap, group.errorMap);
+  });
   const group = subscribe({
     battery: { type: 'battery', refreshInterval: 15000 },
   }, update);
@@ -76,6 +80,7 @@ export function renderPower(root) {
         : 'No battery data reported (desktop PCs may have no battery).', errors.battery ? 'error' : 'note'));
     }
 
+    if (capacityError) nodes.push(element('p', `Battery capacity: ${capacityError}`, 'note error'));
     stats.replaceChildren(...nodes);
   }
 }

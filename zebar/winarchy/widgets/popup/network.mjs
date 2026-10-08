@@ -1,6 +1,6 @@
 import * as zebar from 'https://esm.sh/zebar@3.3.1';
 import { networkConnection, linkRate, ipv4 } from '../shared/network-model.mjs';
-import { networkStatsCommand, networkMetrics, networkOverviewEntries } from '../shared/network-stats.mjs';
+import { networkStatsCommand, networkMetrics, networkOverviewEntries, selectNetworkStats, networkStatsMatch } from '../shared/network-stats.mjs';
 import { openWifiSettings } from '../shared/wifi-settings.mjs';
 import { handoffPopupToNative } from '../shared/popup-controller.mjs';
 import { readSnapshot, writeSnapshot, clearSnapshot, networkSnapshotValid, trafficSnapshotValid } from '../shared/snapshot-cache.mjs';
@@ -65,14 +65,16 @@ function networkDetails(entries, reportError) {
 
 export function renderNetwork(root, reportError) {
   const networkCacheKey = 'winarchy.network.connection.v1';
-  const trafficCacheKey = 'winarchy.network.traffic.v1';
+  const trafficCacheKey = 'winarchy.network.traffic.v2';
   const cachedNetwork = readSnapshot(networkCacheKey, networkSnapshotValid);
   const cachedTraffic = readSnapshot(trafficCacheKey, trafficSnapshotValid);
   let liveNetworkSeen = false;
   const connection = element('div', undefined, 'network-connection');
   const traffic = element('div', undefined, 'network-traffic');
   const emptyEntries = () => [...networkMetrics(null), ['IP Address', '--'], ['Link rate', '--']];
-  const trafficDetails = networkDetails(cachedTraffic?.entries ?? emptyEntries(), reportError);
+  const initialInterface = networkConnection(cachedNetwork).iface;
+  const matchingCache = networkStatsMatch(cachedTraffic?.snapshot, initialInterface) ? cachedTraffic : null;
+  const trafficDetails = networkDetails(matchingCache?.entries ?? emptyEntries(), reportError);
   const statsError = element('p', undefined, 'note error');
   statsError.setAttribute('role', 'status');
   statsError.hidden = true;
@@ -115,16 +117,16 @@ export function renderNetwork(root, reportError) {
   connectionError.hidden = true;
   connection.append(heading, ethernetDetails.list, connectionError);
   root.append(connection, traffic);
-  let previousStats = cachedTraffic?.snapshot ?? null;
-  let previousTime = cachedTraffic?.time ?? 0;
+  let previousStats = matchingCache?.snapshot ?? null;
+  let previousTime = matchingCache?.time ?? 0;
   let statsBusy = false;
   let statsInitialized = false;
   let statsClosed = false;
-  let latestStats = cachedTraffic?.snapshot ?? null;
-  let latestInterface = null;
+  let latestStats = matchingCache?.snapshot ?? null;
+  let latestInterface = initialInterface;
   let connectionTitle = 'No connection';
   function updateWifiLabels() {
-    networkTitle.textContent = latestStats?.ssid && latestInterface && /wifi|wireless|802\.11/i.test(latestInterface.type ?? '')
+    networkTitle.textContent = latestStats?.ssid && networkStatsMatch(latestStats, latestInterface)
       ? latestStats.ssid : connectionTitle;
   }
   async function updateStats() {
@@ -133,7 +135,7 @@ export function renderNetwork(root, reportError) {
     try {
       const backgroundTraffic = !statsInitialized ? readBackgroundSnapshot(trafficCacheKey, trafficSnapshotValid) : null;
       statsInitialized = true;
-      if (backgroundTraffic) {
+      if (backgroundTraffic && networkStatsMatch(backgroundTraffic.snapshot, latestInterface)) {
         latestStats = backgroundTraffic.snapshot;
         previousStats = backgroundTraffic.snapshot; previousTime = backgroundTraffic.time;
         trafficDetails.update(backgroundTraffic.entries);
@@ -145,7 +147,7 @@ export function renderNetwork(root, reportError) {
       });
       if (statsClosed) return;
       if ((result.code ?? result.exitCode) !== 0) throw new Error(result.stderr || 'Network statistics unavailable.');
-      const snapshot = JSON.parse(result.stdout.replace(/^\uFEFF/, '').trim());
+      const snapshot = selectNetworkStats(JSON.parse(result.stdout.replace(/^\uFEFF/, '').trim()), latestInterface);
       latestStats = snapshot;
       updateWifiLabels();
       const now = Date.now();
@@ -202,6 +204,10 @@ export function renderNetwork(root, reportError) {
       if (liveNetworkSeen) { clearSnapshot(networkCacheKey); clearSnapshot(trafficCacheKey); }
       traffic.hidden = true;
       latestInterface = null;
+      latestStats = null;
+      previousStats = null;
+      previousTime = 0;
+      trafficDetails.update(emptyEntries());
       ethernetDetails.list.hidden = true;
       connectionError.hidden = false;
       connectionError.textContent = errors.network ? `Network: ${errors.network.message ?? errors.network}` : 'Network: waiting for data...';
@@ -211,9 +217,15 @@ export function renderNetwork(root, reportError) {
     }
     const { iface, link } = networkConnection(net);
     const kind = link === 'none' ? 'No physical connection' : link === 'wifi' ? 'Wi-Fi' : 'Ethernet';
-    const name = link === 'wifi' ? net.defaultGateway?.ssid || iface?.friendlyName || iface?.name : kind;
+    const name = link === 'wifi' ? iface?.friendlyName || iface?.name : kind;
     const rate = linkRate(iface);
     latestInterface = iface;
+    if (!networkStatsMatch(latestStats, iface)) {
+      latestStats = null;
+      previousStats = null;
+      previousTime = 0;
+      trafficDetails.update(emptyEntries());
+    }
     updateHeading(link === 'wifi' ? 'wifi' : link === 'ethernet' ? 'ethernet' : 'wifi-off',
       link === 'ethernet' && rate ? `${name} (${rate})` : name || kind, link === 'none' ? 'NOT CONNECTED' : `${kind.toUpperCase()} CONNECTION`);
     ethernetDetails.list.hidden = !iface || link === 'wifi';

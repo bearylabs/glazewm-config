@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { startBluetoothBackground, bluetoothBackgroundPermission } from '../widgets/shared/bluetooth-background.mjs';
 import { bluetoothArgs, bluetoothCacheKey, cachedBluetoothSnapshot, cacheBluetoothSnapshot } from '../widgets/shared/bluetooth-model.mjs';
+import { testLocks } from './locks.mjs';
 
 function memory() {
   const values = new Map();
@@ -29,7 +30,7 @@ test('Bluetooth polls known status immediately and every 30 seconds with one mon
   const callbacks = [];
   const calls = [];
   let time = 1000;
-  const options = { storage, now: () => time, schedule: (cb, interval) => { assert.equal(interval, 30000); callbacks.push(cb); return cb; }, cancel: () => {} };
+  const options = { storage, locks: testLocks(), now: () => time, schedule: (cb, interval) => { assert.equal(interval, 30000); callbacks.push(cb); return cb; }, cancel: () => {} };
   const exec = async (program, args) => { calls.push([program, args]); return { code: 0, stdout: JSON.stringify(snapshot) }; };
   const stop = startBluetoothBackground(exec, options);
   const stopOther = startBluetoothBackground(exec, options);
@@ -41,7 +42,7 @@ test('Bluetooth polls known status immediately and every 30 seconds with one mon
   callbacks.forEach(cb => cb());
   await tick();
   assert.equal(calls.length, 2);
-  stop();
+  await stop();
   time += 30000;
   callbacks[1]();
   await tick();
@@ -55,8 +56,9 @@ test('Bluetooth background reads do not overlap or overwrite a newer popup cache
   let resolve;
   let calls = 0;
   const stop = startBluetoothBackground(() => { calls++; return new Promise(r => { resolve = r; }); }, {
-    storage, schedule: cb => { refresh = cb; return 1; }, cancel: () => {},
+    storage, locks: testLocks(), schedule: cb => { refresh = cb; return 1; }, cancel: () => {},
   });
+  await tick();
   refresh();
   assert.equal(calls, 1);
   const newer = { ...snapshot, devices: [{ ...snapshot.devices[0], connected: true }] };
@@ -65,6 +67,7 @@ test('Bluetooth background reads do not overlap or overwrite a newer popup cache
   await tick();
   assert.deepEqual(cachedBluetoothSnapshot(storage), newer);
   refresh();
+  await tick();
   stop();
   resolve({ code: 0, stdout: JSON.stringify(snapshot) });
   await tick();
@@ -77,14 +80,14 @@ test('Bluetooth background failures retain cached devices and blocked storage sk
   const before = storage.getItem(bluetoothCacheKey);
   const warnings = [];
   const stop = startBluetoothBackground(async () => ({ code: 1, stderr: 'Access denied' }), {
-    storage, schedule: () => 1, cancel: () => {}, warn: (...args) => warnings.push(args),
+    storage, locks: testLocks(), schedule: () => 1, cancel: () => {}, warn: (...args) => warnings.push(args),
   });
   await tick();
   assert.equal(warnings.length, 1);
   assert.equal(storage.getItem(bluetoothCacheKey), before);
   stop();
   const blocked = { getItem() { throw new Error('Blocked'); }, setItem() { throw new Error('Blocked'); } };
-  const stopBlocked = startBluetoothBackground(assert.fail, { storage: blocked, schedule: () => 1, cancel: () => {} });
+  const stopBlocked = startBluetoothBackground(assert.fail, { storage: blocked, locks: testLocks(), schedule: () => 1, cancel: () => {} });
   await tick();
   stopBlocked();
 });

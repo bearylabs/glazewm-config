@@ -9,6 +9,26 @@ export const batteryCapacityArgs = ['-NoProfile', '-NonInteractive', '-Command',
 export function batteryCapacityArgsRegex() {
   return `^${batteryCapacityArgs.join(' ').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`;
 }
+export async function queryPowerStatus(exec) {
+  const result = await exec('powershell.exe', [...powerStatusArgs], {
+    timeout: 15000, timeoutMessage: 'Power status query timed out.',
+  });
+  if (result.code !== 0) throw new Error(result.stderr?.trim() || 'Power status query failed.');
+  const status = JSON.parse(result.stdout.replace(/^\uFEFF/, '').trim());
+  if (!status || typeof status.ac !== 'string' || typeof status.battery !== 'string' ||
+      !Number.isFinite(status.charge)) throw new Error('Invalid power status.');
+  return status;
+}
+export async function queryBatteryCapacity(exec) {
+  const result = await exec('powershell.exe', [...batteryCapacityArgs], {
+    timeout: 15000, timeoutMessage: 'Battery capacity query timed out.',
+  });
+  if (result.code !== 0) throw new Error(result.stderr?.trim() || 'Battery capacity query failed.');
+  const value = JSON.parse(result.stdout.replace(/^\uFEFF/, '').trim());
+  if (value === null) return null;
+  if (!Number.isFinite(value) || value <= 0 || value >= 4294967295) throw new Error('Invalid battery capacity.');
+  return value / 1000;
+}
 
 export function batteryDetails(battery, capacity) {
   const valid = value => Number.isFinite(value) && value >= 0;

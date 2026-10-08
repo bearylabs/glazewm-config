@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { batteryIndicator, batteryDetails, batteryCapacityArgs, batteryCapacityArgsRegex } from '../widgets/shared/battery-model.mjs';
+import { batteryIndicator, batteryDetails, batteryCapacityArgs, batteryCapacityArgsRegex, queryPowerStatus, queryBatteryCapacity } from '../widgets/shared/battery-model.mjs';
+import { createShellQueryExecutor } from '../widgets/shared/shell-query.mjs';
 import { readFile } from 'node:fs/promises';
 
 test('screenshot details use real units and explicit missing values', () => {
@@ -39,3 +40,50 @@ test('absent battery and invalid data never imply an empty or full battery', () 
   }
   assert.equal(batteryIndicator(null).state, 'unknown');
 });
+
+test('battery reads distinguish missing firmware data from query errors and malformed output', async () => {
+  assert.equal(await queryBatteryCapacity(async () => ({ code: 0, stdout: '\uFEFFnull' })), null);
+  assert.equal(await queryBatteryCapacity(async () => ({ code: 0, stdout: '\uFEFF38000' })), 38);
+  for (const stdout of ['"38000"', '-1', '4294967295']) {
+    await assert.rejects(queryBatteryCapacity(async () => ({ code: 0, stdout })), /Invalid battery capacity/);
+  }
+  await assert.rejects(queryBatteryCapacity(async () => ({ code: 1, stderr: 'Access denied' })), /Access denied/);
+  await assert.rejects(queryPowerStatus(async () => ({ code: 0, stdout: '{}' })), /Invalid power status/);
+  const status = { ac: 'Online', charge: 0.8, battery: 'High' };
+  assert.deepEqual(await queryPowerStatus(async () => ({ code: 0, stdout: JSON.stringify(status) })), status);
+});
+
+for (const [name, read, stdout] of [
+  ['Power status', queryPowerStatus, '{"ac":"Online","charge":0.8,"battery":"High"}'],
+  ['Battery capacity', queryBatteryCapacity, '38000'],
+]) {
+  test(`${name} kills stalled reads and prevents duplicates across popup reopening`, async () => {
+    const timers = new Map();
+    let spawns = 0;
+    let kills = 0;
+    let finish;
+    let output;
+    const query = createShellQueryExecutor(async () => {
+      spawns++;
+      return { onStdout(fn) { output = fn; }, onStderr() {}, onExit(fn) { finish = fn; } };
+    }, async () => { kills++; }, {
+      schedule(fn, timeout) { assert.equal(timeout, 15000); timers.set(fn, timeout); return fn; },
+      cancel: fn => timers.delete(fn),
+    });
+    const pending = assert.rejects(read(query), /query timed out/);
+    await new Promise(resolve => setImmediate(resolve));
+    await assert.rejects(read(query), /previous status query is still running/);
+    assert.equal(spawns, 1);
+    [...timers.keys()][0]();
+    await pending;
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(kills, 1);
+    const retry = read(query);
+    await new Promise(resolve => setImmediate(resolve));
+    output(stdout);
+    finish({ code: 0 });
+    await retry;
+    assert.equal(spawns, 2);
+    assert.equal(timers.size, 0);
+  });
+}

@@ -55,6 +55,13 @@ The Display popup is a minimal, read-only panel matching the other Omarchy-style
 
 The compact battery popup shows charge, a charge bar, full-charge capacity (Wh), cycles, time to full and charging/discharging watts. Missing firmware data is shown as `—`. Capacity is queried once per opening with a read-only Windows CIM command; the other values come from Zebar. System/drive details, health and session actions are removed. Power-profile controls are intentionally omitted because Windows power modes are not uniformly available through simple power-plan commands. Restart Zebar to load the added capacity-query permission.
 
+Both the bar's power-status read and the popup's capacity read use the bounded
+read-only query executor. A stalled read is terminated after 15 seconds; reopening
+the popup cannot start a duplicate capacity process while its previous read is
+still active. A successful `null` firmware result remains unavailable (`—`).
+Execution failures, timeouts and malformed responses are reported instead of
+being treated as missing firmware.
+
 ## Bluetooth background status
 
 The bar refreshes the status of known/paired Bluetooth devices every 30 seconds, including while the popup is closed. One monitor bar holds a polling lease to avoid duplicate background queries. Only paired/connected devices are cached; nearby discovery runs exclusively while the popup is open (every 10 seconds, with an eight-second native search and no overlapping scans). The popup displays the paired cache immediately, then refreshes live status. Late background reads do not overwrite a newer popup cache. Query failures preserve the last cached display; blocked storage disables background polling without affecting the popup's live queries. Restart Zebar after changing `zpack.json` to load the bar's added status-only permission; pairing, discovery and radio changes remain popup-only.
@@ -83,15 +90,36 @@ Mutating VPN/Bluetooth
 actions keep their existing one-shot execution and are never cancelled or
 automatically retried by this query executor.
 
+Network and Bluetooth poller leases are acquired and released under Web Locks.
+The lock stays held until that polling round completes, so concurrent monitor
+bars cannot both acquire a lease or start overlapping background rounds. If
+Web Locks are unavailable, background polling reports the problem and stays
+disabled; popup live queries remain independent.
+
+The network statistics command reads all active Wi-Fi adapters and associates
+each SSID with its adapter GUID. The bar and popup select the same adapter as
+their connection display by GUID, MAC address, or an unambiguous non-link-local
+IPv4 match when MAC data is absent. An unmatched adapter's statistics are never
+combined with the displayed interface. Switching interfaces clears old metrics
+and starts a new rate baseline. The identity-aware traffic cache uses a new
+version, so older mixed-interface entries are ignored. Restart Zebar after
+updating to load the regenerated exact statistics-query permissions.
+
 Network polling updates the existing controls in place, preserving keyboard
 focus on IP/Gateway copy buttons and the Windows network flyout button. Failed
 statistics queries show an inline error and clear stale metrics; the next
 successful query starts a fresh rate baseline.
 
-The VPN operation's two-minute deadline uses a session-scoped timer independent
-of status polling. Failed or stalled status reads cannot leave the operation
-pending indefinitely. Confirmation, timeout and popup dismissal all clear the
-timer and release dismissal retention; timeout never resends the action.
+The VPN operation's two-minute deadline starts before the native action is sent
+and includes both action delivery and status confirmation, independently of
+status polling. Failed or stalled native calls cannot leave the popup busy
+indefinitely. Confirmation, timeout and popup dismissal clear session timers
+and release dismissal retention; timeout never resends or cancels the action.
+If native delivery times out, its outcome is reported as unknown and Open client
+remains available. Connect/Disconnect stay disabled, including after reopening
+the popup, until that native call actually settles. Late results cannot restart
+the old operation or hide the client. Open client and automatic client hiding
+also have bounded UI waits.
 
 The Network bar icon keeps its normal connection color when a VPN is active.
 VPN connection state is shown only by the dedicated GlobalProtect icon.

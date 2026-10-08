@@ -7,6 +7,9 @@ import { onPopupSessionEnd } from '../shared/popup-session.mjs';
 import { createIcon } from '../shared/icons.mjs';
 import { shellQuery } from '../shared/native-query.mjs';
 
+// A timed-out native mutation may still run after this render session ends.
+let nativeMutation = null;
+
 export function renderGlobalProtect(root, reportError) {
   const section = document.createElement('section');
   section.className = 'network-section network-vpn';
@@ -74,6 +77,7 @@ export function renderGlobalProtect(root, reportError) {
   let stopped = false;
   let pending = null;
   let pendingTimer = null;
+  const actionCleanups = new Set();
   let error = '';
   let releaseRetention = () => {};
   function finishPending() {
@@ -92,10 +96,12 @@ export function renderGlobalProtect(root, reportError) {
     toggle.title = actionLabel;
     toggle.setAttribute('aria-checked', String(Boolean(snapshot?.connected)));
     section.dataset.connected = String(Boolean(snapshot?.connected));
-    toggle.disabled = !verified || busy || Boolean(pending) || Boolean(error) || !snapshot?.available;
+    toggle.disabled = !verified || busy || Boolean(nativeMutation) || Boolean(pending) || Boolean(error) || !snapshot?.available;
     open.disabled = busy || snapshot?.available === false;
     section.setAttribute('aria-busy', String(busy || Boolean(pending)));
-    note.textContent = error || (pending?.connected ? 'Complete login/MFA in the GlobalProtect client.' : '');
+    note.textContent = error || (nativeMutation && !busy
+      ? 'A previous native action is still running. Check the official client; VPN controls remain disabled until it exits.'
+      : pending?.connected ? 'Complete login/MFA in the GlobalProtect client.' : '');
     note.hidden = !note.textContent;
     note.classList.toggle('error', Boolean(error));
   }
@@ -114,12 +120,7 @@ export function renderGlobalProtect(root, reportError) {
       if (pending && snapshot.connected === pending.connected) {
         const dismissClient = pending.dismissClient;
         finishPending();
-        if (dismissClient) {
-          busy = true;
-          try { await executeGlobalProtect(zebar.shellExec, 'hide'); }
-          catch (failure) { if (!stopped) reportError(new Error(`VPN state confirmed, but the client window could not be hidden: ${failure.message}`)); }
-          finally { busy = false; }
-        }
+        if (dismissClient) await act('hide');
       }
     } catch (failure) {
       if (!stopped) {
@@ -133,16 +134,42 @@ export function renderGlobalProtect(root, reportError) {
     }
   }
   async function act(action) {
-    if (busy || stopped || (action !== 'open' && (!verified || pending || error || !snapshot?.available))) return;
+    if (busy || stopped || (action !== 'open' && (nativeMutation || !verified || pending || error || !snapshot?.available))) return;
     // An explicit Open client request overrides automatic dismissal for this operation.
     if (action === 'open' && pending) pending.dismissClient = false;
     busy = true;
     render();
+    const operation = { expired: false };
+    const startedAt = Date.now();
+    let actionTimer;
+    let expireAction;
+    const deadline = new Promise((_, reject) => {
+      expireAction = () => {
+        operation.expired = true;
+        reject(new Error('GlobalProtect action timed out; its outcome is unknown. Check the official client. No action was retried.'));
+      };
+      actionTimer = setTimeout(expireAction, 120000);
+    });
+    const endAction = () => { clearTimeout(actionTimer); expireAction(); };
+    actionCleanups.add(endAction);
+    let native;
     try {
-      if (action !== 'open') releaseRetention = retainPopupDuringInteraction();
-      const response = await executeGlobalProtect(zebar.shellExec, action);
-      if (stopped) return;
+      if (['connect', 'disconnect'].includes(action)) releaseRetention = retainPopupDuringInteraction();
+      native = executeGlobalProtect(zebar.shellExec, action);
       if (action !== 'open') {
+        nativeMutation = native;
+        const releaseMutation = () => {
+          if (nativeMutation === native) nativeMutation = null;
+        };
+        void native.then(releaseMutation, failure => {
+          releaseMutation();
+          if (operation.expired) console.error('Late GlobalProtect action failure:', failure);
+        });
+      }
+      const response = await Promise.race([native, deadline]);
+      if (stopped || operation.expired) return;
+      clearTimeout(actionTimer);
+      if (['connect', 'disconnect'].includes(action)) {
         clearSnapshot(cacheKey);
         pending = { connected: action === 'connect', dismissClient: true };
         pendingTimer = setTimeout(() => {
@@ -151,15 +178,19 @@ export function renderGlobalProtect(root, reportError) {
             reportError(new Error('GlobalProtect did not reach the requested state. Check the client before retrying.'));
             render();
           }
-        }, 120000);
+        }, Math.max(0, 120000 - (Date.now() - startedAt)));
         if (response.placementWarning) {
           reportError(new Error(`VPN action requested, but the client window could not be placed beside the popup: ${response.placementWarning}`));
         }
       }
     } catch (failure) {
       finishPending();
-      if (!stopped) reportError(failure);
+      if (!stopped) reportError(action === 'hide'
+        ? new Error(`VPN state confirmed, but the client window could not be hidden: ${failure.message}`)
+        : failure);
     } finally {
+      clearTimeout(actionTimer);
+      actionCleanups.delete(endAction);
       busy = false;
       if (!stopped) { render(); void refresh(); }
     }
@@ -174,6 +205,8 @@ export function renderGlobalProtect(root, reportError) {
     stopped = true;
     clearInterval(interval);
     finishPending();
+    for (const expire of actionCleanups) expire();
+    actionCleanups.clear();
   });
   render();
   void refresh();

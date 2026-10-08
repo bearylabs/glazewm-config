@@ -1,3 +1,5 @@
+import { networkStatsValid } from './network-stats.mjs';
+
 // Short-lived, best-effort display cache. Native actions must verify live state.
 export const snapshotCacheMaxAge = 120000;
 function localStorageOrNull() {
@@ -16,6 +18,26 @@ export function writeSnapshot(key, value, storage = localStorageOrNull(), now = 
 export function clearSnapshot(key, storage = localStorageOrNull()) {
   try { storage?.removeItem(key); } catch { /* Optional cache. */ }
 }
+const validLease = value => value && typeof value.owner === 'string' && Number.isFinite(value.until);
+export async function withPollingLease(key, owner, duration, action, {
+  storage, now = Date.now, locks = globalThis.navigator?.locks, requireStorage = false,
+} = {}) {
+  if (!locks) throw new Error('Web Locks are required for background polling.');
+  return locks.request(`${key}:ownership`, { ifAvailable: true }, async lock => {
+    if (!lock) return;
+    const lease = readSnapshot(key, validLease, storage, now());
+    if (lease && lease.owner !== owner && lease.until > now()) return;
+    writeSnapshot(key, { owner, until: now() + duration }, storage, now());
+    if (requireStorage && readSnapshot(key, validLease, storage, now())?.owner !== owner) return;
+    await action();
+  });
+}
+export async function releasePollingLease(key, owner, { storage, now = Date.now, locks = globalThis.navigator?.locks } = {}) {
+  if (!locks) return;
+  await locks.request(`${key}:ownership`, () => {
+    if (readSnapshot(key, validLease, storage, now())?.owner === owner) clearSnapshot(key, storage);
+  });
+}
 export function vpnSnapshotValid(value) {
   return value && typeof value.available === 'boolean' && typeof value.connected === 'boolean';
 }
@@ -29,8 +51,7 @@ export function networkSnapshotValid(value) {
     (value.defaultGateway == null || typeof value.defaultGateway === 'object');
 }
 export function trafficSnapshotValid(value) {
-  return value && Number.isFinite(value.time) && value.snapshot && typeof value.snapshot.id === 'string' &&
-    Number.isFinite(value.snapshot.received) && Number.isFinite(value.snapshot.sent) &&
+  return value && Number.isFinite(value.time) && networkStatsValid(value.snapshot) &&
     Array.isArray(value.entries) && value.entries.length === 8 && value.entries.every(entry =>
       Array.isArray(entry) && entry.length === 2 && entry.every(part => typeof part === 'string'));
 }

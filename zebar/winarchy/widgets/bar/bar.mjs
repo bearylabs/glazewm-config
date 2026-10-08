@@ -1,6 +1,6 @@
 import * as zebar from 'https://esm.sh/zebar@3.3.1';
 import { networkConnection } from '../shared/network-model.mjs';
-import { batteryIndicator, powerStatusArgs } from '../shared/battery-model.mjs';
+import { batteryIndicator, queryPowerStatus } from '../shared/battery-model.mjs';
 import { createIcon, createBatteryIcon } from '../shared/icons.mjs';
 import { startNetworkBackground } from '../shared/network-background.mjs';
 import { startBluetoothBackground } from '../shared/bluetooth-background.mjs';
@@ -105,9 +105,7 @@ async function refreshPower() {
   let status;
   let failure;
   try {
-    const result = await zebar.shellExec('powershell.exe', [...powerStatusArgs]);
-    if (result.code !== 0) throw new Error(result.stderr || 'Power status query failed.');
-    status = JSON.parse(result.stdout.replace(/^\uFEFF/, '').trim());
+    status = await queryPowerStatus(shellQuery);
   } catch (error) {
     failure = error.message ?? String(error);
     console.error('Power status:', error);

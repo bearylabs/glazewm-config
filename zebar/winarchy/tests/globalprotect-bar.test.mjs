@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { startNetworkBackground } from '../widgets/shared/network-background.mjs';
+import { testLocks } from './locks.mjs';
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
@@ -10,11 +11,12 @@ test('VPN bar updates from live background status even when storage is unavailab
   let fail = false;
   const updates = [];
   const stop = startNetworkBackground(async (_program, args) => {
-    if (args[3].includes('GetIPv4Statistics')) return { code: 0, stdout: 'null' };
+    if (args[3].includes('GetIPv4Statistics')) return { code: 0, stdout: '[]' };
     if (fail) return { code: 1, stderr: 'Unavailable' };
     return { code: 0, stdout: JSON.stringify(vpn) };
   }, () => null, {
     storage: null,
+    locks: testLocks(),
     schedule: fn => { tick = fn; return 1; },
     cancel: () => {},
     onVpn: value => updates.push(value),

@@ -30,6 +30,6 @@ test('network caches validate the data needed for rendering', () => {
   assert(networkSnapshotValid({ defaultInterface: { type: 'wifi', ipv4Addresses: ['10.0.0.1'] }, interfaces: [] }));
   assert(!networkSnapshotValid({ defaultInterface: { ipv4Addresses: 'bad' }, interfaces: [] }));
   assert(!networkSnapshotValid({}));
-  assert(trafficSnapshotValid({ time: 1, snapshot: { id: 'wifi', received: 1, sent: 2 }, entries: Array.from({ length: 8 }, () => ['Ping', '--']) }));
+  assert(trafficSnapshotValid({ time: 1, snapshot: { id: 'wifi', ipv4Addresses: ['10.0.0.2'], received: 1, sent: 2 }, entries: Array.from({ length: 8 }, () => ['Ping', '--']) }));
   assert(!trafficSnapshotValid({ time: 1, snapshot: {}, entries: [] }));
 });
