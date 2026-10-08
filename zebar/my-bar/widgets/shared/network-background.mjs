@@ -15,7 +15,7 @@ export function readBackgroundSnapshot(key, validate, storage, now = Date.now())
   return lease && lease.until > now ? readSnapshot(key, validate, storage, now, 35000) : null;
 }
 
-export function startNetworkBackground(exec, getNetwork, { storage, interval = 30000, now = Date.now, schedule = setInterval, cancel = clearInterval } = {}) {
+export function startNetworkBackground(exec, getNetwork, { storage, interval = 30000, now = Date.now, schedule = setInterval, cancel = clearInterval, onVpn = () => {} } = {}) {
   let busy = false;
   let stopped = false;
   let previous = null;
@@ -62,7 +62,10 @@ export function startNetworkBackground(exec, getNetwork, { storage, interval = 3
         previous = snapshot; previousTime = time;
       })(),
       executeGlobalProtect(exec, 'status').then(vpn => {
-        if (!stopped) writeSnapshot('my-bar.network.vpn.v1', vpn, storage, now());
+        if (!stopped) {
+          writeSnapshot('my-bar.network.vpn.v1', vpn, storage, now());
+          onVpn(vpn);
+        }
       }),
     ];
     try {
@@ -72,6 +75,7 @@ export function startNetworkBackground(exec, getNetwork, { storage, interval = 3
         if (!stopped && result.status === 'rejected') {
           clearSnapshot(keys[index], storage);
           if (index === 0) previous = null;
+          else onVpn(null);
           console.warn('Background network status:', result.reason?.message ?? result.reason);
         }
       });

@@ -19,10 +19,12 @@ test('Wi-Fi permission only allows the native network flyout; radio scripts are 
     assert(!/executeWifiRadio|wifi-radio\.mjs|refreshRadio/.test(source));
   }
 });
-test('opening native network selection delegates to Explorer and reports launch errors', async () => {
+test('native network selection spawns Explorer once without interpreting its exit code', async () => {
   const calls = [];
-  await openWifiSettings(async (...args) => { calls.push(args); return { code: 0 }; });
+  await openWifiSettings(async (...args) => {
+    calls.push(args);
+    return { processId: 123, onExit: () => { throw new Error('Must not wait for Explorer exit'); } };
+  });
   assert.deepEqual(calls, [['explorer.exe', ['ms-availablenetworks:']]]);
-  await assert.rejects(openWifiSettings(async () => ({ exitCode: 1, stderr: 'Access denied' })), /Access denied/);
-  await assert.rejects(openWifiSettings(async () => ({ code: 1 })), /Could not open/);
+  await assert.rejects(openWifiSettings(async () => { throw new Error('Access denied'); }), /Access denied/);
 });

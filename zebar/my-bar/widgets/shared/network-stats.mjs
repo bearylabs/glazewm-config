@@ -23,6 +23,17 @@ export function byteSize(value, rate = false) {
   while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
   return `${value.toFixed(i ? 1 : 0)} ${units[i]}${rate ? '/s' : ''}`;
 }
+// Apply at render time too, so older cached entries use the current layout.
+export function networkOverviewEntries(entries) {
+  const ordered = entries.slice();
+  const gateway = ordered.findIndex(([label]) => label === 'Gateway');
+  const rate = ordered.findIndex(([label]) => label === 'Link rate');
+  if (gateway >= 0 && rate >= 0 && gateway < rate) {
+    [ordered[gateway], ordered[rate]] = [ordered[rate], ordered[gateway]];
+  }
+  return ordered;
+}
+
 export function networkMetrics(snapshot, previous, elapsed) {
   const same = snapshot && previous && snapshot.id === previous.id && elapsed > 0;
   return [

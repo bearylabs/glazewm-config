@@ -4,6 +4,7 @@ import { retainPopupDuringInteraction } from '../shared/popup-controller.mjs';
 import { readSnapshot, writeSnapshot, clearSnapshot, vpnSnapshotValid } from '../shared/snapshot-cache.mjs';
 import { readBackgroundSnapshot } from '../shared/network-background.mjs';
 import { onPopupSessionEnd } from '../shared/popup-session.mjs';
+import { createIcon } from '../shared/icons.mjs';
 
 export function renderGlobalProtect(root, reportError) {
   const section = document.createElement('section');
@@ -12,8 +13,9 @@ export function renderGlobalProtect(root, reportError) {
   const header = document.createElement('div');
   header.className = 'network-section__heading';
   const title = document.createElement('h2');
-  title.textContent = 'VPN';
-  header.append(title);
+  title.id = 'globalprotect-title';
+  title.textContent = 'GlobalProtect';
+  header.append(createIcon('globalprotect'), title);
   const row = document.createElement('div');
   row.className = 'network-vpn__row';
   const labels = document.createElement('div');
@@ -58,7 +60,8 @@ export function renderGlobalProtect(root, reportError) {
   open.className = 'network-vpn__open';
   open.setAttribute('aria-label', 'Open GlobalProtect client');
   open.title = 'Open GlobalProtect client';
-  controls.append(open, toggle);
+  header.append(open);
+  controls.append(toggle);
   row.append(labels, controls);
   const note = document.createElement('p');
   note.className = 'note network-note';

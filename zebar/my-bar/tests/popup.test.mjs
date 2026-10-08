@@ -358,6 +358,7 @@ async function harness({ startError = null, warmError = null, holdWarm = false, 
       expanded: type => findTrigger(type).attributes['aria-expanded'],
       dismiss: controller.dismissPopup,
       retain: controller.retainPopupDuringInteraction,
+      handoff: controller.handoffPopupToNative,
     };
   }
   return {
@@ -704,8 +705,35 @@ test('prewarm initialisation hides the native window without rendering, showing,
   assert.deepEqual(popup.errors, []);
 });
 
-test('network client/MFA focus loss retains the popup until the operation ends', async () => {
-  const popup = await popupHarness(true, 'network');
+test('native Wi-Fi handoff hides the popup before a single launch and suppresses late blur dismissal', async () => {
+  const env = await harness();
+  const bar = await env.bar('bar-1');
+  bar.click('network'); await env.settle();
+  let launches = 0;
+  await bar.handoff(async () => {
+    launches++;
+    assert.equal(env.nativeWindows.length, 0);
+    assert.equal(env.state().type, 'network');
+    assert.equal(await bar.dismiss(env.state().requestId, true), false);
+  });
+  assert.equal(launches, 1);
+  assert.equal(env.state(), null);
+  assert.equal(env.nativeWindows.length, 0);
+});
+
+test('failed native Wi-Fi launch restores the original popup and releases retention', async () => {
+  const env = await harness();
+  const bar = await env.bar('bar-1');
+  bar.click('network'); await env.settle();
+  const id = env.state().requestId;
+  await assert.rejects(bar.handoff(async () => { throw new Error('Launch failed'); }), /Launch failed/);
+  assert.equal(env.nativeWindows.length, 1);
+  assert.equal(env.state().requestId, id);
+  assert.equal(env.state().retainDismissalUntil, undefined);
+});
+
+test('GlobalProtect client/MFA focus loss retains the popup until the operation ends', async () => {
+  const popup = await popupHarness(true, 'globalprotect');
   const release = popup.retain();
   await popup.focus(false);
   await popup.webviewBlur();
@@ -718,11 +746,11 @@ test('network client/MFA focus loss retains the popup until the operation ends',
 });
 
 test('explicit dismissal bypasses retention and expired retention cannot trap the popup', async () => {
-  const explicit = await popupHarness(true, 'network');
+  const explicit = await popupHarness(true, 'globalprotect');
   explicit.retain();
   await explicit.dismiss();
   assert.equal(explicit.closed, true);
-  const expired = await popupHarness(true, 'network');
+  const expired = await popupHarness(true, 'globalprotect');
   expired.retain(-1);
   await expired.focus(false);
   assert.equal(expired.closed, true);
@@ -731,7 +759,7 @@ test('explicit dismissal bypasses retention and expired retention cannot trap th
 test('retained MFA outside clicks rearm native detection; normal outside dismissal resumes afterward', async () => {
   const env = await harness();
   const bar = await env.bar('bar-1');
-  bar.click('network');
+  bar.click('globalprotect');
   await env.settle();
   const release = bar.retain();
   bar.outsideClick();
@@ -751,7 +779,7 @@ test('retained MFA outside clicks rearm native detection; normal outside dismiss
 test('retention releases only its original request and never suppresses other popup types', async () => {
   const env = await harness();
   const bar = await env.bar('bar-1');
-  bar.click('network');
+  bar.click('globalprotect');
   await env.settle();
   const releaseOld = bar.retain();
   bar.click('audio');

@@ -15,6 +15,8 @@ export const iconPaths = Object.freeze({
   'battery-charging': 'M16.67,4H15V2H9V4H7.33A1.33,1.33 0 0,0 6,5.33V20.66C6,21.4 6.6,22 7.33,22H16.66C17.4,22 18,21.4 18,20.67V5.33C18,4.6 17.4,4 16.67,4M11,20V14.5H9L13,7V12.5H15',
   'battery-unknown': 'M15.07,12.25L14.17,13.17C13.63,13.71 13.25,14.18 13.09,15H11.05C11.16,14.1 11.56,13.28 12.17,12.67L13.41,11.41C13.78,11.05 14,10.55 14,10C14,8.89 13.1,8 12,8A2,2 0 0,0 10,10H8A4,4 0 0,1 12,6A4,4 0 0,1 16,10C16,10.88 15.64,11.68 15.07,12.25M13,19H11V17H13M16.67,4H15V2H9V4H7.33A1.33,1.33 0 0,0 6,5.33V20.66C6,21.4 6.6,22 7.33,22H16.67C17.4,22 18,21.4 18,20.66V5.33C18,4.59 17.4,4 16.67,4Z',
   chip: 'M6,4H18V5H21V7H18V9H21V11H18V13H21V15H18V17H21V19H18V20H6V19H3V17H6V15H3V13H6V11H3V9H6V7H3V5H6V4M11,15V18H12V15H11M13,15V18H14V15H13M15,15V18H16V15H15Z',
+  // Custom globe inside a protective shield for the dedicated VPN control.
+  globalprotect: 'M12 1 22 5V11C22 17 18 21 12 23C6 21 2 17 2 11V5ZM12 5A7 7 0 1 0 12 19A7 7 0 0 0 12 5ZM12 7C11.3 7 10.5 8.5 10.2 11H13.8C13.5 8.5 12.7 7 12 7ZM7.1 11H8.2C8.3 9.8 8.6 8.7 9 8A5 5 0 0 0 7.1 11ZM15.8 11H16.9A5 5 0 0 0 15 8C15.4 8.7 15.7 9.8 15.8 11ZM7.1 13A5 5 0 0 0 9 16C8.6 15.3 8.3 14.2 8.2 13ZM10.2 13C10.5 15.5 11.3 17 12 17C12.7 17 13.5 15.5 13.8 13ZM15.8 13C15.7 14.2 15.4 15.3 15 16A5 5 0 0 0 16.9 13Z',
   // Filled split tiles preserve the existing GlazeWM direction semantics.
   'split-horizontal': 'M3 4H11V20H3ZM13 4H21V20H13Z',
   'split-vertical': 'M3 4H21V11H3ZM3 13H21V20H3Z',
@@ -26,6 +28,7 @@ export function createIcon(name, className = '') {
   const svg = document.createElementNS(namespace, 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
   svg.setAttribute('fill', 'currentColor');
+  if (name === 'globalprotect') svg.setAttribute('fill-rule', 'evenodd');
   svg.setAttribute('aria-hidden', 'true');
   svg.setAttribute('focusable', 'false');
   if (className) svg.setAttribute('class', className);

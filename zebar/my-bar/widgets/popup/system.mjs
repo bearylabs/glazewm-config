@@ -7,8 +7,9 @@ import { diskUsage, executePowerAction, gib, percent, powerCommands } from '../s
 
 import { renderBluetooth } from './bluetooth.mjs';
 import { renderGlobalProtect } from './globalprotect.mjs';
-import { networkStatsCommand, networkMetrics } from '../shared/network-stats.mjs';
+import { networkStatsCommand, networkMetrics, networkOverviewEntries } from '../shared/network-stats.mjs';
 import { openWifiSettings } from '../shared/wifi-settings.mjs';
+import { handoffPopupToNative } from '../shared/popup-controller.mjs';
 import { readSnapshot, writeSnapshot, clearSnapshot, networkSnapshotValid, trafficSnapshotValid } from '../shared/snapshot-cache.mjs';
 import { readBackgroundSnapshot } from '../shared/network-background.mjs';
 import { onPopupSessionEnd } from '../shared/popup-session.mjs';
@@ -20,11 +21,26 @@ function element(tag, text, className) {
   return node;
 }
 
-function details(entries, className = '') {
+function details(entries, className = '', reportError = console.error) {
   const list = element('dl', undefined, className);
-  for (const [label, value] of entries) {
+  const network = className.split(' ').includes('network-overview');
+  for (const [label, value] of network ? networkOverviewEntries(entries) : entries) {
     const item = element('div');
-    item.append(element('dt', label), element('dd', value ?? 'Unavailable'));
+    const displayValue = value ?? 'Unavailable';
+    const description = element('dd');
+    if (network && ['IP Address', 'Gateway'].includes(label) && value && !['--', 'Unavailable'].includes(value)) {
+      const copy = button(displayValue, () => {
+        void Promise.resolve().then(() => navigator.clipboard.writeText(String(value))).then(() => {
+          copy.title = 'Copied to clipboard';
+          copy.setAttribute('aria-label', `${label} ${value} copied to clipboard`);
+        }).catch(reportError);
+      });
+      copy.className = 'network-copy';
+      copy.title = `Copy ${label}: ${value}`;
+      copy.setAttribute('aria-label', copy.title);
+      description.append(copy);
+    } else description.textContent = displayValue;
+    item.append(element('dt', label), description);
     list.append(item);
   }
   return list;
@@ -237,8 +253,17 @@ function renderNetwork(root, reportError) {
   let liveNetworkSeen = false;
   const connection = element('div', undefined, 'network-connection');
   const traffic = element('div', undefined, 'network-traffic');
-  traffic.append(details(cachedTraffic?.entries ?? networkMetrics(null), 'network-details network-overview'));
-  const wifiOpen = button('', () => void openWifiSettings(zebar.shellExec).catch(reportError));
+  traffic.append(details(cachedTraffic?.entries ?? networkMetrics(null), 'network-details network-overview', reportError));
+  let wifiOpening = false;
+  const wifiOpen = button('', () => {
+    if (wifiOpening) return;
+    wifiOpening = true;
+    wifiOpen.disabled = true;
+    void handoffPopupToNative(() => openWifiSettings(zebar.shellSpawn)).catch(reportError).finally(() => {
+      wifiOpening = false;
+      wifiOpen.disabled = false;
+    });
+  });
   wifiOpen.id = 'wifi-settings-open';
   wifiOpen.className = 'network-vpn__open';
   wifiOpen.setAttribute('aria-label', 'Open Windows Wi-Fi networks');
@@ -266,7 +291,7 @@ function renderNetwork(root, reportError) {
   let latestInterface = null;
   function updateWifiLabels() {
     const title = connection.querySelector('#network-title');
-    if (latestStats?.ssid && title && latestInterface && /wifi|wireless|802\.11/i.test(latestInterface.type ?? '')) { title.textContent = latestStats.ssid; title.title = latestStats.ssid; }
+    if (latestStats?.ssid && title && latestInterface && /wifi|wireless|802\.11/i.test(latestInterface.type ?? '')) { title.textContent = latestStats.ssid; }
   }
   async function updateStats() {
     if (statsBusy || statsClosed) return;
@@ -277,7 +302,7 @@ function renderNetwork(root, reportError) {
       if (backgroundTraffic) {
         latestStats = backgroundTraffic.snapshot;
         previousStats = backgroundTraffic.snapshot; previousTime = backgroundTraffic.time;
-        traffic.replaceChildren(details(backgroundTraffic.entries, 'network-details network-overview'));
+        traffic.replaceChildren(details(backgroundTraffic.entries, 'network-details network-overview', reportError));
         updateWifiLabels();
         return;
       }
@@ -293,12 +318,11 @@ function renderNetwork(root, reportError) {
         ['IP Address', ipv4(latestInterface) || '--'],
         ['Link rate', linkRate(latestInterface) || '--'],
       ];
-      traffic.replaceChildren(details(entries, 'network-details network-overview'));
+      traffic.replaceChildren(details(entries, 'network-details network-overview', reportError));
       if (snapshot) writeSnapshot(trafficCacheKey, { snapshot, time: now, entries });
       else clearSnapshot(trafficCacheKey);
-      traffic.title = 'Ping measures the Wi-Fi gateway. Byte totals are adapter counters, not session usage.';
       previousStats = snapshot; previousTime = now;
-    } catch (error) { traffic.title = error.message; }
+    } catch (error) { console.warn('Network statistics:', error.message); }
     finally { statsBusy = false; }
   }
   void updateStats();
@@ -311,13 +335,11 @@ function renderNetwork(root, reportError) {
     statsClosed = true; clearInterval(statsTimer);
     window.removeEventListener('storage', onNetworkStorage);
   });
-  renderGlobalProtect(root, reportError);
   function heading(icon, title, meta) {
     const node = hero(icon, title, meta);
     node.classList.add('network-hero');
     const label = node.querySelector('.hero__title');
     label.id = 'network-title';
-    label.title = title;
     node.append(wifiOpen);
     return node;
   }
@@ -347,7 +369,7 @@ function renderNetwork(root, reportError) {
     latestInterface = iface;
     if (iface && link !== 'wifi') nodes.push(details([
       ['IP Address', ipv4(iface) || '--'],
-    ], 'network-details network-overview'));
+    ], 'network-details network-overview', reportError));
     traffic.hidden = link !== 'wifi';
     if (errors.network) nodes.push(unavailable('Network', errors.network));
     connection.replaceChildren(...nodes);
@@ -574,14 +596,14 @@ function renderPower(root, reportError) {
 
 export function renderSystemPopup(type, reportError) {
   const root = document.getElementById('system-content');
-  const renderers = { audio: renderAudio, network: renderNetwork, bluetooth: renderBluetooth, display: renderDisplay, power: renderPower };
+  const renderers = { audio: renderAudio, network: renderNetwork, globalprotect: renderGlobalProtect, bluetooth: renderBluetooth, display: renderDisplay, power: renderPower };
   if (!Object.hasOwn(renderers, type)) throw new Error(`Unknown system popup: ${type}`);
   document.documentElement.dataset.popupType = type;
-  const omarchyPanel = ['audio', 'network', 'bluetooth', 'display', 'power'].includes(type);
+  const omarchyPanel = ['audio', 'network', 'globalprotect', 'bluetooth', 'display', 'power'].includes(type);
   document.querySelector('header').hidden = omarchyPanel;
   document.querySelector('main').setAttribute('aria-labelledby', omarchyPanel ? `${type}-title` : 'month-label');
   document.getElementById('month-label').textContent = {
-    audio: 'Audio', network: 'Network', bluetooth: 'Bluetooth', display: 'Displays', power: 'Power & system',
+    audio: 'Audio', network: 'Network', globalprotect: 'GlobalProtect', bluetooth: 'Bluetooth', display: 'Displays', power: 'Power & system',
   }[type];
   let disposed = false;
   onPopupSessionEnd(() => { disposed = true; });

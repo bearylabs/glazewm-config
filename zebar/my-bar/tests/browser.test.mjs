@@ -78,6 +78,11 @@ const mocks = `
       },
     };
   }
+  export async function shellSpawn(program, args) {
+    calls.push(['shell-spawn', program, args]);
+    if (window.__test.failShellSpawn) throw new Error('Process launch failed');
+    return { processId: 123 };
+  }
   export async function shellExec(program, args) {
     if (window.__holdNetwork && program === 'powershell.exe' && /GlobalProtectButton|GetRadiosAsync|GetIPv4Statistics/.test(args[3] ?? '')) {
       while (window.__holdNetwork) await new Promise(resolve => setTimeout(resolve, 20));
@@ -144,6 +149,10 @@ const controllerMock = `
   export function retainPopupDuringInteraction() {
     window.__test.retained = true;
     return () => { window.__test.retained = false; };
+  }
+  export async function handoffPopupToNative(action) {
+    window.__test.nativeHandoffs = (window.__test.nativeHandoffs ?? 0) + 1;
+    await action();
   }
   export async function initialisePopup(render, reportError) {
     try {
@@ -296,12 +305,29 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert(Math.abs(result.center - result.viewport / 2) < 0.5);
       assert.match(result.clock, /10:58/);
       assert(result.clock.length > 5, 'Omarchy weekday belongs in clock');
-      assert.deepEqual(result.triggers, ['calendar', 'bluetooth', 'network', 'audio', 'display', 'power']);
+      assert.deepEqual(result.triggers, ['calendar', 'globalprotect', 'bluetooth', 'network', 'audio', 'display', 'power']);
       assert.deepEqual(result.workspaces, ['One', '2']);
       assert.equal(result.modes, 'pauseresize');
       assert.equal(result.bg, 'rgb(30, 30, 46)');
       assert.deepEqual(result.calls.filter(call => call[0] === 'wm'), [['wm', 'focus --workspace 2']]);
       assert.equal(result.oldStats, false);
+    });
+    await t.test('GlobalProtect is the first right icon, installed-only and muted when disconnected', async () => {
+      await load('bar');
+      assert.equal(await evaluate("document.querySelector('.zone--right button').id"), 'globalprotect-trigger');
+      for (const vpn of [
+        { available: false, connected: false },
+        { available: true, connected: false },
+        { available: true, connected: true },
+      ]) {
+        await evaluate(`localStorage.setItem('my-bar.network.vpn.v1', JSON.stringify({ time: Date.now(), value: ${JSON.stringify(vpn)} }));
+          window.dispatchEvent(new StorageEvent('storage', { key: 'my-bar.network.vpn.v1' }));`);
+        assert.equal(await evaluate("document.getElementById('globalprotect-trigger').hidden"), !vpn.available);
+        assert.equal(await evaluate("document.getElementById('globalprotect-trigger').classList.contains('is-muted')"), !vpn.connected);
+        assert.equal(await evaluate("getComputedStyle(document.querySelector('#globalprotect-trigger .vpn__slash')).display !== 'none'"), !vpn.connected);
+        if (vpn.available) assert.notEqual(await evaluate("getComputedStyle(document.getElementById('globalprotect-trigger')).display"), 'none');
+      }
+      assert.equal(await evaluate("getComputedStyle(document.getElementById('globalprotect-trigger')).color === getComputedStyle(document.getElementById('display-trigger')).color"), true);
     });
     await t.test('center and right triggers only underline while their popup is open', async () => {
       await load('bar');
@@ -319,7 +345,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
             openColor: getComputedStyle(node).color, openLine: line.content, lineHeight: line.height };
         });
       })()`);
-      assert.equal(results.length, 6);
+      assert.equal(results.length, 7);
       for (const result of results) {
         assert.equal(result.hoverBackground, 'rgba(0, 0, 0, 0)');
         assert.equal(result.openBackground, 'rgba(0, 0, 0, 0)');
@@ -335,7 +361,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       await load('bar');
       assert(await evaluate(`(() => {
         const icons = [...document.querySelectorAll('.status svg, .split svg')];
-        return icons.length === 9 && icons.every(icon =>
+        return icons.length === 10 && icons.every(icon =>
           icon.getAttribute('fill') === 'currentColor' && !icon.hasAttribute('stroke') &&
           icon.getAttribute('aria-hidden') === 'true' && getComputedStyle(icon).width === '16px');
       })()`));
@@ -425,7 +451,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       }
     });
     await t.test('popup height follows rendered content rather than filling the viewport', async () => {
-      for (const type of ['calendar', 'audio', 'network', 'bluetooth', 'display', 'power']) {
+      for (const type of ['calendar', 'audio', 'network', 'globalprotect', 'bluetooth', 'display', 'power']) {
         await load(type);
         const result = await evaluate(`({
           height: window.__popupHeights.at(-1),
@@ -577,6 +603,8 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert.equal(await evaluate("document.getElementById('month-label').textContent"), nextMonth,
         'Exactly one navigation handler should fire after reopening.');
       await evaluate("window.__reopenPopup('network')");
+      assert.equal(await evaluate("document.querySelectorAll('#globalprotect-toggle').length"), 0);
+      await evaluate("window.__reopenPopup('globalprotect')");
       assert.equal(await evaluate("document.querySelectorAll('#globalprotect-toggle').length"), 1);
       await evaluate("window.__reopenPopup('audio')");
       assert.equal(await evaluate("document.querySelectorAll('#volume-slider').length"), 1);
@@ -590,7 +618,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       const vpnCalls = await evaluate("window.__test.calls.filter(call => call[0] === 'globalprotect').length");
       await pause(1100);
       assert.equal(await evaluate("window.__test.calls.filter(call => call[0] === 'globalprotect').length"), vpnCalls,
-        'Hidden/replaced Network sessions must not keep polling.');
+        'Hidden/replaced GlobalProtect sessions must not keep polling.');
     });
     await t.test('audio slider and mute send provider commands and reflect external updates', async () => {
       await load('audio');
@@ -720,7 +748,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
           sections: [...panel.querySelectorAll('h2')].map(node => node.textContent),
           flat: panel.querySelectorAll('.card, .stat, .badge, .details-grid').length === 0,
           controls: panel.querySelectorAll('button, input').length,
-          vpn: panel.querySelector('.network-section__state').textContent,
+          vpn: panel.querySelector('.network-vpn'),
           fits: panel.scrollWidth <= panel.clientWidth && document.body.scrollHeight <= innerHeight,
         };
       })()`);
@@ -731,17 +759,29 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert.match(result.font, /JetBrainsMono/);
       assert.equal(result.padding, '14px');
       assert.equal(result.radius, '0px');
-      assert.deepEqual(result.sections, ['VPN']);
+      assert.deepEqual(result.sections, []);
       assert.equal(result.flat, true);
       assert.equal(result.controls, 3);
-      assert.equal(result.vpn, 'Disconnected');
+      assert.equal(result.vpn, null);
       assert.equal(result.fits, true);
+      assert.deepEqual(await evaluate(`[...document.querySelectorAll('#system-content [title]')].map(node => node.getAttribute('title')).sort()`),
+        ['Copy Gateway: 192.168.1.1', 'Copy IP Address: 192.168.1.2', 'Open Windows Wi-Fi networks'].sort());
       assert.equal(await evaluate("document.querySelector('.network-diagnostics')"), null);
-      assert(await evaluate("document.querySelector('.network-vpn .note').hidden"));
+      assert.equal(await evaluate("document.querySelector('.network-vpn')"), null);
       assert.equal(await evaluate("[...document.querySelectorAll('.network-traffic dt')].find(node => node.textContent === 'IP Address').nextElementSibling.textContent"), '192.168.1.2');
-      assert.equal(await evaluate("document.getElementById('globalprotect-toggle').getAttribute('role')"), 'switch');
-      assert.equal(await evaluate("document.getElementById('globalprotect-open').getAttribute('aria-label')"), 'Open GlobalProtect client');
       assert(await evaluate("document.getElementById('system-content').scrollHeight < 320"));
+      assert.deepEqual(await evaluate("[...document.querySelectorAll('.network-traffic dt')].map(node => node.textContent)"),
+        ['Ping', 'Link rate', 'Receiving', 'Sending', 'Downloaded', 'Uploaded', 'IP Address', 'Gateway']);
+      await evaluate(`window.__copiedAddresses = [];
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+          writeText: async value => window.__copiedAddresses.push(value),
+        } });
+        for (const label of ['IP Address', 'Gateway']) {
+          const row = [...document.querySelectorAll('.network-traffic dt')].find(node => node.textContent === label);
+          row.nextElementSibling.querySelector('button').click();
+        }`);
+      await pause(20);
+      assert.deepEqual(await evaluate('window.__copiedAddresses'), ['192.168.1.2', '192.168.1.1']);
       if (process.env.NETWORK_SCREENSHOT_PATH) {
         await evaluate(`window.__test.data.network.defaultGateway.ssid = 'Office Wi-Fi'; window.__test.notify()`);
         await pause(50);
@@ -750,21 +790,16 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
           format: 'png', clip: { x: 0, y: 0, width: popupSizes.network.width, height, scale: 1 },
         });
         await writeFile(process.env.NETWORK_SCREENSHOT_PATH, Buffer.from(data, 'base64'));
-        await evaluate('window.__test.globalprotect = { available: true, connected: true }; window.__refreshGlobalProtect()');
-        await pause(150); // Let the Omarchy-style switch finish its knob transition.
-        const connected = await client.call('Page.captureScreenshot', {
-          format: 'png', clip: { x: 0, y: 0, width: popupSizes.network.width, height, scale: 1 },
-        });
-        await writeFile(process.env.NETWORK_SCREENSHOT_PATH.replace(/\.png$/, '-connected.png'), Buffer.from(connected.data, 'base64'));
-        await evaluate('window.__test.globalprotect.connected = false; window.__refreshGlobalProtect()');
+
       }
       await evaluate(`window.__test.data.network = {
         defaultInterface: { name: 'Ethernet adapter', type: 'ethernet', receiveSpeed: 2.5e9,
           ipv4Addresses: ['10.0.0.2'], ipv6Addresses: [] },
       }; window.__test.notify()`);
       assert.equal(await evaluate("document.getElementById('network-title').textContent"), 'Ethernet (2.5 Gb/s)');
+      assert.equal(await evaluate("document.getElementById('network-title').hasAttribute('title')"), false);
       assert.equal(await evaluate("document.querySelector('.hero__meta').textContent"), 'ETHERNET CONNECTION');
-      assert.equal(await evaluate("document.querySelectorAll('.network-section').length"), 1);
+      assert.equal(await evaluate("document.querySelectorAll('.network-section').length"), 0);
       assert.equal(await evaluate("document.querySelectorAll('.network-connection .network-overview dt').length"), 1, 'Ethernet speed is already in the hero.');
       assert.equal(await evaluate("document.querySelector('.network-connection .network-overview dd').textContent"), '10.0.0.2');
       assert.equal(await evaluate("document.querySelector('.network-diagnostics')"), null);
@@ -791,8 +826,10 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
         JSON.stringify(overflow));
     });
     await t.test('VPN action hover stays aligned with the icon and centered switch track', async () => {
-      await load('network');
+      await load('globalprotect');
       await evaluate('window.__refreshGlobalProtect()');
+      assert(await evaluate("document.querySelector('.network-section__heading #globalprotect-open') !== null"));
+      assert.equal(await evaluate("document.querySelector('.network-vpn__actions #globalprotect-open')"), null);
       const geometry = await evaluate(`(() => {
         const open = document.getElementById('globalprotect-open');
         const toggle = document.getElementById('globalprotect-toggle');
@@ -836,7 +873,10 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       await client.call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 0, y: 0 });
     });
     await t.test('GlobalProtect keeps controls mounted, waits for MFA, and confirms state independently of the route', async () => {
-      await load('network');
+      await load('globalprotect');
+      assert.equal(await evaluate("document.querySelector('main').getAttribute('aria-labelledby')"), 'globalprotect-title');
+      assert.equal(await evaluate("document.getElementById('globalprotect-toggle').getAttribute('role')"), 'switch');
+      assert.equal(await evaluate("document.getElementById('globalprotect-open').getAttribute('aria-label')"), 'Open GlobalProtect client');
       await evaluate('window.__refreshGlobalProtect()');
       assert.equal(await evaluate("document.getElementById('globalprotect-toggle').getAttribute('aria-label')"), 'Connect GlobalProtect');
       assert.equal(await evaluate("document.getElementById('globalprotect-toggle').getAttribute('aria-checked')"), 'false');
@@ -874,7 +914,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert(await evaluate("document.getElementById('globalprotect-toggle').disabled"));
     });
     await t.test('explicit Open client during a pending VPN action prevents automatic hiding', async () => {
-      await load('network');
+      await load('globalprotect');
       await evaluate('window.__refreshGlobalProtect()');
       await evaluate("document.getElementById('globalprotect-toggle').click()");
       await pause(30);
@@ -894,11 +934,11 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
         await load('network');
         assert.equal(await evaluate("document.querySelector('.network-traffic').textContent"), before);
         assert.equal(await evaluate("document.getElementById('network-title').textContent"), '<script>bad</script>');
-        assert.equal(await evaluate("document.querySelector('.network-section__state').textContent"), 'Disconnected');
-        assert(await evaluate("!document.getElementById('wifi-settings-open').disabled && document.getElementById('globalprotect-toggle').disabled"));
+        assert.equal(await evaluate("document.querySelector('.network-vpn')"), null);
+        assert(await evaluate("!document.getElementById('wifi-settings-open').disabled"));
         await evaluate('window.__holdNetwork = false; window.__test.notify()');
         await pause(100);
-        assert(await evaluate("!document.getElementById('wifi-settings-open').disabled && !document.getElementById('globalprotect-toggle').disabled"));
+        assert(await evaluate("!document.getElementById('wifi-settings-open').disabled"));
       } finally {
         await evaluate('window.__holdNetwork = false');
         await client.call('Page.removeScriptToEvaluateOnNewDocument', { identifier: injected.identifier });
@@ -909,26 +949,30 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert(await evaluate("document.querySelector('.network-hero #wifi-settings-open svg') !== null"));
       assert.equal(await evaluate("document.getElementById('wifi-settings-open').getAttribute('aria-label')"), 'Open Windows Wi-Fi networks');
       assert.equal(await evaluate("document.getElementById('wifi-toggle')"), null);
-      const styles = await evaluate(`['wifi-settings-open', 'globalprotect-open'].map(id => {
-        const css = getComputedStyle(document.getElementById(id));
+      const arrowStyle = id => evaluate(`(() => {
+        const css = getComputedStyle(document.getElementById('${id}'));
         return [css.backgroundColor, css.borderRadius, css.borderTopWidth, css.borderTopColor, css.width, css.height, css.padding];
-      })`);
-      assert.deepEqual(styles[0], styles[1]);
+      })()`);
+      const wifiStyle = await arrowStyle('wifi-settings-open');
+      await evaluate("window.__reopenPopup('globalprotect')");
+      assert.deepEqual(await arrowStyle('globalprotect-open'), wifiStyle);
+      await evaluate("window.__reopenPopup('network')");
       await evaluate("document.getElementById('wifi-settings-open').click()");
       await pause(30);
-      assert.deepEqual(await evaluate('window.__test.calls.at(-1)'), ['shell', 'explorer.exe', ['ms-availablenetworks:']]);
+      assert.deepEqual(await evaluate('window.__test.calls.at(-1)'), ['shell-spawn', 'explorer.exe', ['ms-availablenetworks:']]);
+      assert.equal(await evaluate('window.__test.nativeHandoffs'), 1);
       await evaluate('window.__test.data.network = null; window.__test.notify()');
       assert(await evaluate("!document.getElementById('wifi-settings-open').disabled"));
       await evaluate("document.getElementById('wifi-settings-open').click()");
       await pause(30);
-      assert.deepEqual(await evaluate('window.__test.calls.at(-1)'), ['shell', 'explorer.exe', ['ms-availablenetworks:']]);
+      assert.deepEqual(await evaluate('window.__test.calls.at(-1)'), ['shell-spawn', 'explorer.exe', ['ms-availablenetworks:']]);
       assert.deepEqual(await evaluate("window.__test.calls.filter(c => c[0] === 'wifi-radio')"), []);
     });
     await t.test('network omits diagnostics and treats device text as text', async () => {
       await load('network');
       const text = await evaluate("document.getElementById('system-content').textContent");
       assert(await evaluate('document.body.scrollHeight <= innerHeight'));
-      for (const value of ['WI-FI CONNECTION', '192.168.1.2', 'GlobalProtect', '<script>bad</script>']) {
+      for (const value of ['WI-FI CONNECTION', '192.168.1.2', '<script>bad</script>']) {
         assert(text.includes(value), value);
       }
       assert.equal(await evaluate("document.querySelector('#system-content script') !== null"), false);

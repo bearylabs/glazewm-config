@@ -4,9 +4,9 @@ export const wifiSettingsPermission = {
   argsRegex: '^ms-availablenetworks:$',
 };
 
-export async function openWifiSettings(shellExec) {
-  const result = await shellExec(wifiSettingsPermission.program, ['ms-availablenetworks:']);
-  if ((result.code ?? result.exitCode) !== 0) {
-    throw new Error(result.stderr || 'Could not open Windows network selection.');
-  }
+export async function openWifiSettings(shellSpawn) {
+  // Explorer delegates URI activation to the Windows shell asynchronously.
+  // Its eventual exit code is not a flyout-success signal, especially on cold start.
+  // Only spawn failures are actionable; do not wait for exit or resend the URI.
+  await shellSpawn(wifiSettingsPermission.program, ['ms-availablenetworks:']);
 }

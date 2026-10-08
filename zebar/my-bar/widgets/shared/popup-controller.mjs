@@ -120,9 +120,9 @@ export async function prewarmPopup() {
 
 // Native client/MFA interactions temporarily retain this exact popup request.
 // The deadline bounds retention even if the WebView or operation fails.
-export function retainPopupDuringInteraction(duration = 150000) {
+export function retainPopupDuringInteraction(duration = 150000, type = 'globalprotect') {
   const state = readState();
-  if (!state || state.type !== 'network') return () => {};
+  if (!state || state.type !== type) return () => {};
   const requestId = state.requestId;
   const deadline = Date.now() + duration;
   writeState({ ...state, retainDismissalUntil: deadline });
@@ -138,13 +138,40 @@ export async function dismissPopup(requestId, automatic = false) {
   return exclusive(async () => {
     const state = readState();
     if (requestId && state?.requestId !== requestId) return;
-    if (automatic && state?.type === 'network' && state.retainDismissalUntil > Date.now()) return false;
+    if (automatic && ['globalprotect', 'network'].includes(state?.type) && state.retainDismissalUntil > Date.now()) return false;
     const windows = await popupWindows();
     // Unlike destroying our own WebView, hiding it allows code to continue.
     // Publish only after success so a failed hide preserves the live session.
     await Promise.all(windows.map(nativeWindow => nativeWindow.hide()));
     writeState(null);
   });
+}
+
+// Hide Zebar before opening a native flyout, not in reaction to its activation.
+// Cold-start Windows flyouts are especially sensitive to that late focus change.
+export async function handoffPopupToNative(action) {
+  const state = readState();
+  if (state?.type !== 'network') throw new Error('No active Network popup.');
+  const release = retainPopupDuringInteraction(10000, 'network');
+  let windows = [];
+  try {
+    await exclusive(async () => {
+      if (readState()?.requestId !== state.requestId) return;
+      windows = await popupWindows();
+      await Promise.all(windows.map(nativeWindow => nativeWindow.hide()));
+    });
+    // Let Windows finish the hide/focus transition before URI activation.
+    await new Promise(resolve => setTimeout(resolve, 100));
+    if (readState()?.requestId !== state.requestId) return;
+    await action();
+    await dismissPopup(state.requestId);
+  } catch (error) {
+    // Keep launch failures visible and retryable in the original popup only.
+    if (readState()?.requestId === state.requestId) {
+      await Promise.all(windows.map(nativeWindow => nativeWindow.show()));
+    }
+    throw error;
+  } finally { release(); }
 }
 
 async function togglePopup(type, rect, closeRequestId = null) {
