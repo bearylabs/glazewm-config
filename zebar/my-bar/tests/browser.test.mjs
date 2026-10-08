@@ -895,30 +895,34 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
         assert.equal(await evaluate("document.querySelector('.network-traffic').textContent"), before);
         assert.equal(await evaluate("document.getElementById('network-title').textContent"), '<script>bad</script>');
         assert.equal(await evaluate("document.querySelector('.network-section__state').textContent"), 'Disconnected');
-        assert(await evaluate("document.getElementById('wifi-toggle').disabled && document.getElementById('globalprotect-toggle').disabled"));
+        assert(await evaluate("!document.getElementById('wifi-settings-open').disabled && document.getElementById('globalprotect-toggle').disabled"));
         await evaluate('window.__holdNetwork = false; window.__test.notify()');
         await pause(100);
-        assert(await evaluate("!document.getElementById('wifi-toggle').disabled && !document.getElementById('globalprotect-toggle').disabled"));
+        assert(await evaluate("!document.getElementById('wifi-settings-open').disabled && !document.getElementById('globalprotect-toggle').disabled"));
       } finally {
         await evaluate('window.__holdNetwork = false');
         await client.call('Page.removeScriptToEvaluateOnNewDocument', { identifier: injected.identifier });
       }
     });
-    await t.test('Wi-Fi header switch controls the native radio and shows denied access', async () => {
+    await t.test('Wi-Fi header opens native network selection and matches the VPN arrow style', async () => {
       await load('network');
-      assert.equal(await evaluate("document.getElementById('wifi-toggle').getAttribute('aria-checked')"), 'true');
-      assert(await evaluate("document.querySelector('.network-hero #wifi-toggle') !== null"));
-      await evaluate("document.getElementById('wifi-toggle').click()");
+      assert(await evaluate("document.querySelector('.network-hero #wifi-settings-open svg') !== null"));
+      assert.equal(await evaluate("document.getElementById('wifi-settings-open').getAttribute('aria-label')"), 'Open Windows Wi-Fi networks');
+      assert.equal(await evaluate("document.getElementById('wifi-toggle')"), null);
+      const styles = await evaluate(`['wifi-settings-open', 'globalprotect-open'].map(id => {
+        const css = getComputedStyle(document.getElementById(id));
+        return [css.backgroundColor, css.borderRadius, css.borderTopWidth, css.borderTopColor, css.width, css.height, css.padding];
+      })`);
+      assert.deepEqual(styles[0], styles[1]);
+      await evaluate("document.getElementById('wifi-settings-open').click()");
       await pause(30);
-      assert.equal(await evaluate("document.getElementById('wifi-toggle').getAttribute('aria-checked')"), 'false');
-      await evaluate("document.getElementById('wifi-toggle').click()");
+      assert.deepEqual(await evaluate('window.__test.calls.at(-1)'), ['shell', 'explorer.exe', ['ms-availablenetworks:']]);
+      await evaluate('window.__test.data.network = null; window.__test.notify()');
+      assert(await evaluate("!document.getElementById('wifi-settings-open').disabled"));
+      await evaluate("document.getElementById('wifi-settings-open').click()");
       await pause(30);
-      assert.equal(await evaluate("document.getElementById('wifi-toggle').getAttribute('aria-checked')"), 'true');
-      await evaluate("window.__test.failWifiRadio = true; document.getElementById('wifi-toggle').click()");
-      await pause(30);
-      assert.equal(await evaluate("document.getElementById('wifi-toggle').getAttribute('aria-checked')"), 'true');
-      assert.match(await evaluate("document.querySelector('.network-note.error').textContent"), /denied/);
-      assert.deepEqual(await evaluate("window.__test.calls.filter(c => c[0] === 'wifi-radio').map(c => c[1])"), ['status', 'status', 'off', 'status', 'on', 'status']);
+      assert.deepEqual(await evaluate('window.__test.calls.at(-1)'), ['shell', 'explorer.exe', ['ms-availablenetworks:']]);
+      assert.deepEqual(await evaluate("window.__test.calls.filter(c => c[0] === 'wifi-radio')"), []);
     });
     await t.test('network omits diagnostics and treats device text as text', async () => {
       await load('network');

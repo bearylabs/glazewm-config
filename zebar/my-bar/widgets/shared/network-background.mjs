@@ -1,14 +1,12 @@
 import { networkConnection, ipv4, linkRate } from './network-model.mjs';
 import { networkStatsCommand, networkStatsArgsRegex, networkMetrics } from './network-stats.mjs';
-import { executeWifiRadio, wifiRadioArgs } from './wifi-radio.mjs';
 import { executeGlobalProtect, globalProtectArgs } from './globalprotect-model.mjs';
 import { readSnapshot, writeSnapshot, clearSnapshot } from './snapshot-cache.mjs';
 
 const exactPermission = args => '^' + args.join(' ').replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$';
-// The bar can read status only. Radio and VPN actions remain popup-only.
+// The bar can read status only. VPN actions remain popup-only.
 export const networkBackgroundPermissions = [
   { program: 'powershell.exe', argsRegex: networkStatsArgsRegex },
-  { program: 'powershell.exe', argsRegex: exactPermission(wifiRadioArgs('status')) },
   { program: 'powershell.exe', argsRegex: exactPermission(globalProtectArgs('status')) },
 ];
 
@@ -63,16 +61,13 @@ export function startNetworkBackground(exec, getNetwork, { storage, interval = 3
         else clearSnapshot('my-bar.network.traffic.v1', storage);
         previous = snapshot; previousTime = time;
       })(),
-      executeWifiRadio(exec, 'status').then(radio => {
-        if (!stopped) writeSnapshot('my-bar.network.radio.v1', radio, storage, now());
-      }),
       executeGlobalProtect(exec, 'status').then(vpn => {
         if (!stopped) writeSnapshot('my-bar.network.vpn.v1', vpn, storage, now());
       }),
     ];
     try {
       const results = await Promise.allSettled(queries);
-      const keys = ['my-bar.network.traffic.v1', 'my-bar.network.radio.v1', 'my-bar.network.vpn.v1'];
+      const keys = ['my-bar.network.traffic.v1', 'my-bar.network.vpn.v1'];
       results.forEach((result, index) => {
         if (!stopped && result.status === 'rejected') {
           clearSnapshot(keys[index], storage);

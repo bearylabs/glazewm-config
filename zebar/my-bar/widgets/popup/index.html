@@ -276,8 +276,9 @@
       .network-vpn__labels { display: grid; gap: 2px; min-width: 0; }
       #globalprotect-name { font-size: 12px; }
       .network-vpn__actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
-      .network-vpn__actions button { border: 1px solid transparent; border-radius: 0; background: transparent; }
-      .network-vpn__actions button:hover, .network-vpn__actions button:focus-visible { border-color: var(--audio-outline); background: var(--audio-hover); outline: none; }
+      .network-vpn__actions button, .panel .network-vpn__open { border: 1px solid transparent; border-radius: 0; background: transparent; }
+      .network-vpn__actions button:hover, .network-vpn__actions button:focus-visible,
+      .panel .network-vpn__open:hover, .panel .network-vpn__open:focus-visible { border-color: var(--audio-outline); background: var(--audio-hover); outline: none; }
       .panel .network-vpn__open { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; line-height: 1; }
       .network-vpn__open svg { display: block; width: 16px; height: 16px; }
       .panel .network-vpn__switch { display: grid; place-items: center; width: 54px; height: 34px; padding: 6px; border: 0; }
