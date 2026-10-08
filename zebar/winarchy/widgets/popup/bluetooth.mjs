@@ -2,6 +2,7 @@ import * as zebar from 'https://esm.sh/zebar@3.3.1';
 import { bluetoothGroups, executeBluetooth, mergeBluetoothSnapshot, cachedBluetoothSnapshot, cacheBluetoothSnapshot, openBluetoothSettings } from '../shared/bluetooth-model.mjs';
 import { createIcon } from '../shared/icons.mjs';
 import { onPopupSessionEnd } from '../shared/popup-session.mjs';
+import { shellQuery } from '../shared/native-query.mjs';
 
 function node(tag, text, className = '') {
   const el = document.createElement(tag);
@@ -192,9 +193,9 @@ export function renderBluetooth(root) {
     const startedAt = revision;
     render();
     try {
-      const result = await executeBluetooth(zebar.shellExec, action, id);
+      const result = await executeBluetooth(query ? shellQuery : zebar.shellExec, action, id);
       if (disposed || (query && startedAt !== revision)) return;
-      const snapshot = result ?? await executeBluetooth(zebar.shellExec, 'status');
+      const snapshot = result ?? await executeBluetooth(shellQuery, 'status');
       if (disposed) return;
       state = mergeBluetoothSnapshot(state, snapshot, action === 'scan');
       if (id) deviceMessages.delete(id);

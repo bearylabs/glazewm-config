@@ -140,21 +140,11 @@ export function globalProtectArgsRegex() {
     .replace('__ACTION__', '(?:status|connect|disconnect|open|hide)') + '$';
 }
 
-export async function executeGlobalProtect(shellExec, action, queryTimeout = 15000) {
+export async function executeGlobalProtect(exec, action, queryTimeout = 15000) {
   const args = globalProtectArgs(action);
-  let timer;
-  let result;
-  try {
-    const operation = shellExec('powershell.exe', args);
-    // Only read-only queries can time out locally. A click must not be retried
-    // while its native process could still be acting on the client.
-    result = action === 'status' ? await Promise.race([
-      operation,
-      new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error('GlobalProtect status query timed out.')), queryTimeout);
-      }),
-    ]) : await operation;
-  } finally { clearTimeout(timer); }
+  const result = action === 'status'
+    ? await exec('powershell.exe', args, { timeout: queryTimeout, timeoutMessage: 'GlobalProtect status query timed out.' })
+    : await exec('powershell.exe', args);
   if (result.code !== 0) throw new Error(result.stderr?.trim() || 'GlobalProtect operation failed.');
   const data = JSON.parse(result.stdout.replace(/^\uFEFF/, '').trim());
   if (action === 'status') {

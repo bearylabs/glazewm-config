@@ -167,19 +167,11 @@ export function bluetoothArgsRegex() {
   const device = escape(actionCommand('pair', 'ab')).replace('pair', '(?:pair|connect|disconnect|forget)').replace('0xab', '0x[0-9a-f]{2}(?:,0x[0-9a-f]{2}){1,4095}');
   return '^' + base.replace('__ACTION__', '(?:' + [...fixed, device].join('|') + ')') + '$';
 }
-export async function executeBluetooth(shellExec, action, id, queryTimeout = 20000) {
+export async function executeBluetooth(exec, action, id, queryTimeout = 20000) {
   const args = bluetoothArgs(action, id);
-  let timer;
-  let result;
-  try {
-    const operation = shellExec('powershell.exe', args);
-    result = ['status', 'scan'].includes(action) ? await Promise.race([
-      operation,
-      new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error('Bluetooth query timed out. Please try again.')), queryTimeout);
-      }),
-    ]) : await operation;
-  } finally { clearTimeout(timer); }
+  const result = ['status', 'scan'].includes(action)
+    ? await exec('powershell.exe', args, { timeout: queryTimeout, timeoutMessage: 'Bluetooth query timed out. Please try again.' })
+    : await exec('powershell.exe', args);
   if (result.code !== 0) throw new Error(result.stderr?.trim() || 'Bluetooth operation failed.');
   return ['status', 'scan'].includes(action) ? JSON.parse(result.stdout.replace(/^\uFEFF/, '').trim()) : null;
 }

@@ -5,6 +5,7 @@ import { readSnapshot, writeSnapshot, clearSnapshot, vpnSnapshotValid } from '..
 import { readBackgroundSnapshot } from '../shared/network-background.mjs';
 import { onPopupSessionEnd } from '../shared/popup-session.mjs';
 import { createIcon } from '../shared/icons.mjs';
+import { shellQuery } from '../shared/native-query.mjs';
 
 export function renderGlobalProtect(root, reportError) {
   const section = document.createElement('section');
@@ -72,10 +73,13 @@ export function renderGlobalProtect(root, reportError) {
   let initialized = false;
   let stopped = false;
   let pending = null;
+  let pendingTimer = null;
   let error = '';
   let releaseRetention = () => {};
   function finishPending() {
     pending = null;
+    clearTimeout(pendingTimer);
+    pendingTimer = null;
     releaseRetention();
     releaseRetention = () => {};
   }
@@ -101,7 +105,7 @@ export function renderGlobalProtect(root, reportError) {
     try {
       const backgroundVpn = !initialized && !pending ? readBackgroundSnapshot(cacheKey, vpnSnapshotValid) : null;
       initialized = true;
-      const next = backgroundVpn ?? await executeGlobalProtect(zebar.shellExec, 'status');
+      const next = backgroundVpn ?? await executeGlobalProtect(shellQuery, 'status');
       if (stopped) return;
       snapshot = next;
       verified = true;
@@ -116,10 +120,6 @@ export function renderGlobalProtect(root, reportError) {
           catch (failure) { if (!stopped) reportError(new Error(`VPN state confirmed, but the client window could not be hidden: ${failure.message}`)); }
           finally { busy = false; }
         }
-      }
-      if (pending && Date.now() > pending.deadline) {
-        finishPending();
-        reportError(new Error('GlobalProtect did not reach the requested state. Check the client before retrying.'));
       }
     } catch (failure) {
       if (!stopped) {
@@ -144,7 +144,14 @@ export function renderGlobalProtect(root, reportError) {
       if (stopped) return;
       if (action !== 'open') {
         clearSnapshot(cacheKey);
-        pending = { connected: action === 'connect', dismissClient: true, deadline: Date.now() + 120000 };
+        pending = { connected: action === 'connect', dismissClient: true };
+        pendingTimer = setTimeout(() => {
+          finishPending();
+          if (!stopped) {
+            reportError(new Error('GlobalProtect did not reach the requested state. Check the client before retrying.'));
+            render();
+          }
+        }, 120000);
         if (response.placementWarning) {
           reportError(new Error(`VPN action requested, but the client window could not be placed beside the popup: ${response.placementWarning}`));
         }

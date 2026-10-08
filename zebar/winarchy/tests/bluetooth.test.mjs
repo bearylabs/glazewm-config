@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { bluetoothAudioSource } from '../widgets/shared/bluetooth-audio-native.mjs';
 import test from 'node:test';
 import { bluetoothArgs, bluetoothArgsRegex, bluetoothGroups, executeBluetooth, mergeBluetoothSnapshot, cachedBluetoothSnapshot, cacheBluetoothSnapshot, bluetoothCacheKey, bluetoothSettingsPermission, openBluetoothSettings } from '../widgets/shared/bluetooth-model.mjs';
+import { createShellQueryExecutor } from '../widgets/shared/shell-query.mjs';
 
 test('Bluetooth groups connected, paired and available devices, excluding unnamed endpoints', () => {
   const connected = { id: '1', name: 'Headset', paired: true, connected: true };
@@ -110,8 +111,14 @@ test('recovery settings launcher has one narrowly allowed URI and reports failur
 });
 
 test('stalled Bluetooth queries time out instead of keeping the popup loading', async () => {
-  await assert.rejects(executeBluetooth(() => new Promise(() => {}), 'status', undefined, 5), /timed out/);
-  await assert.rejects(executeBluetooth(() => new Promise(() => {}), 'scan', undefined, 5), /timed out/);
+  let kills = 0;
+  const query = createShellQueryExecutor(async () => ({
+    onStdout() {}, onStderr() {}, onExit() {},
+  }), async () => { kills++; });
+  await assert.rejects(executeBluetooth(query, 'status', undefined, 5), /timed out/);
+  await assert.rejects(executeBluetooth(query, 'scan', undefined, 5), /timed out/);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(kills, 2);
 });
 
 // Opt-in, read-only Windows integration test: exercise the exact -Command invocation,

@@ -19,6 +19,12 @@ Bluetooth, Display and GlobalProtect renderers. Shared popup DOM helpers live in
 native bridges, caches and window lifecycle helpers remain under `widgets/shared`.
 All assets are included by the existing widget file globs; no build step is needed.
 
+After changing a native command, run `node scripts\sync-winarchy-permissions.mjs`
+from the `.glzr` directory to regenerate the exact shell allowlists in
+`zpack.json`. `--check` verifies them without writing; the test suite also runs
+this check. Only shell command permissions are generated; widget layout and
+other pack settings stay unchanged.
+
 Obsolete system/drive rendering and session-action helpers, styles and permissions
 have been removed. Restart Zebar after updating to unload the old shutdown,
 logout and lock permissions.
@@ -64,6 +70,31 @@ Before sending Connect/Disconnect, the helper moves only the verified GlobalProt
 The Network popup shows the actual Wi-Fi SSID and a compact two-column overview (gateway ping, receiving/sending rates, adapter byte totals, IP address and link rate). VPN controls are now exclusively in the GlobalProtect popup. The overview places Link rate beside Ping and Gateway beside IP Address. Click either IP Address or Gateway value (or focus it and press Enter/Space) to copy that address to the clipboard; unavailable values are not interactive. Rates appear after two samples; totals are Windows adapter counters, not usage since opening the popup. Ping measures the local gateway, not internet reachability. DNS controls and WLAN selection are omitted: the native WLAN scan terminated without diagnostics on this machine, so joining networks remains in Windows Settings. The header arrow button opens the native Windows network selection flyout (`ms-availablenetworks:`), with the same arrow, transparent square button and hover/focus outline as the GlobalProtect Open client action. Before opening the native flyout, Zebar hides the Network popup and allows a short focus-transition interval, then sends the URI once. This avoids a late popup focus change interfering with cold-start flyout activation; no second invocation is sent because it could toggle the flyout closed. Explorer is started with `shellSpawn`: URI activation is asynchronous, so its eventual exit code and flyout startup time are not treated as failure. Only an actual process-start failure restores the original popup and reports the error. The exact flyout presentation depends on the Windows version. Wi-Fi power and joining networks are handled by Windows, not a PowerShell/WinRT radio helper. The helper and its shell permissions were removed because Cortex XDR blocked its status script (`ioc.amsi_static_invocation`) and terminated the GlazeWM → Zebar process chain. Without radio queries, the popup reports connection state but does not distinguish powered-off Wi-Fi from disconnected Wi-Fi. Restart Zebar to unload the old scripts and permissions. Ethernet keeps its IP overview and speed in the hero. Connection details are omitted; explanatory status/MFA text appears only when needed. The persistent bar polls connection, traffic and VPN status every 30 seconds, even when the popup is closed. An open Network popup polls network data every second; an open GlobalProtect popup polls VPN status every second; busy guards prevent overlapping native queries. One monitor bar holds a short-lived polling lease to avoid duplicate queries on multi-monitor desktops. Results are shared through localStorage; the popup uses fresh background results for its initial display, then makes its own one-second queries. Fresh background status (at most 35 seconds old) is usable immediately; older display-cache values expire after two minutes and keep switches disabled until a live query succeeds. No credentials or pending operations are stored. If the bar, background queries or storage are unavailable, the popup falls back to its own queries. Restart Zebar to load the bar's added status-only permissions; actions remain popup-only.
 
 Status is polled every second while the popup is open (every 30 seconds by the background bar) from the PANGP/GlobalProtect adapter (up, with a non-link-local IPv4 address), independently of the default route, so split tunnels are included. This is an adapter-level indication, not an internet or gateway reachability test.
+
+Network statistics and GlobalProtect status queries have a 15-second deadline;
+Bluetooth status and discovery queries have a 20-second deadline. These
+read-only queries use spawned processes so timeout can terminate the exact
+process through Zebar's native API. A replacement of the same query is blocked
+until native exit is observed or the native kill request succeeds. A failed kill
+keeps the query blocked until exit; failures are reported rather than spawning
+overlapping processes. Each query owns and releases its event subscription,
+including after a kill (Zebar 3.3.1 emits no termination event in that case).
+Mutating VPN/Bluetooth
+actions keep their existing one-shot execution and are never cancelled or
+automatically retried by this query executor.
+
+Network polling updates the existing controls in place, preserving keyboard
+focus on IP/Gateway copy buttons and the Windows network flyout button. Failed
+statistics queries show an inline error and clear stale metrics; the next
+successful query starts a fresh rate baseline.
+
+The VPN operation's two-minute deadline uses a session-scoped timer independent
+of status polling. Failed or stalled status reads cannot leave the operation
+pending indefinitely. Confirmation, timeout and popup dismissal all clear the
+timer and release dismissal retention; timeout never resends the action.
+
+The Network bar icon keeps its normal connection color when a VPN is active.
+VPN connection state is shown only by the dedicated GlobalProtect icon.
 
 Actions open the existing client and send one bounded Windows `BM_CLICK` to its verified, enabled, visible Connect or Disconnect button. Tested with GlobalProtect 6.3.3 and English button labels, ID `1160`. No passwords are stored, no adapters or services are toggled, and MFA/SSO remain in the official client. Changes to the client UI, language, or company policy can prevent automation; Open client remains the manual fallback.
 

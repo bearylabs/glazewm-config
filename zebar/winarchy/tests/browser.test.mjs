@@ -91,7 +91,67 @@ const mocks = `
       },
     };
   }
+  let nextPid = 1000;
+  const queryProcesses = new Map();
+  const shellListeners = new Set();
+  export async function listen(name, callback) {
+    if (name !== 'shell-emit') throw new Error('Unexpected native event: ' + name);
+    shellListeners.add(callback);
+    return () => shellListeners.delete(callback);
+  }
+  export async function invoke(command, parameters) {
+    if (command === 'shell_spawn') {
+      const child = await shellSpawn(parameters.program, parameters.args);
+      const emit = event => {
+        for (const callback of [...shellListeners]) callback({ payload: { pid: child.processId, event } });
+      };
+      child.onStdout(data => emit({ type: 'stdout', data }));
+      child.onStderr(data => emit({ type: 'stderr', data }));
+      child.onExit(data => emit({ type: 'terminated', data }));
+      return child.processId;
+    }
+    const { pid } = parameters;
+    if (command !== 'shell_kill') throw new Error('Unexpected native command: ' + command);
+    const process = queryProcesses.get(pid);
+    if (!process) throw new Error('Unknown process ID');
+    if (!process.done) window.__test.queryKills = (window.__test.queryKills ?? 0) + 1;
+    process.done = true;
+    queryProcesses.delete(pid);
+  }
   export async function shellSpawn(program, args) {
+    if (program === 'powershell.exe') {
+      const handlers = {};
+      const pid = nextPid++;
+      const process = {
+        done: false,
+        finish(result) {
+          if (process.done) return;
+          process.done = true;
+          handlers.exit(result);
+        },
+      };
+      queryProcesses.set(pid, process);
+      setTimeout(async () => {
+        if (window.__test.holdNetworkStats && args[3]?.includes('GetIPv4Statistics')) return;
+        try {
+          const result = await shellExec(program, args);
+          if (process.done) return;
+          if (result.stdout) handlers.stdout(result.stdout);
+          if (result.stderr) handlers.stderr(result.stderr);
+          process.finish({ code: result.code, success: result.code === 0, signal: null });
+        } catch (error) {
+          if (process.done) return;
+          handlers.stderr(error.message);
+          process.finish({ code: 1, success: false, signal: null });
+        }
+      }, 0);
+      return {
+        processId: pid,
+        onStdout: callback => { handlers.stdout = callback; },
+        onStderr: callback => { handlers.stderr = callback; },
+        onExit: callback => { handlers.exit = callback; },
+      };
+    }
     calls.push(['shell-spawn', program, args]);
     if (window.__test.failShellSpawn) throw new Error('Process launch failed');
     return { processId: 123 };
@@ -115,7 +175,8 @@ const mocks = `
       return { code: 0, stdout: JSON.stringify(window.__test.globalprotect ?? { available: true, connected: false }) };
     }
     if (program === 'powershell.exe' && args[3]?.includes('$nic.GetIPv4Statistics()')) {
-      return { code: 0, stdout: JSON.stringify({ id: 'wifi', received: 1410000000, sent: 353000000, gateway: '192.168.1.1', ping: 31 }) };
+      if (window.__test.failNetworkStats) return { code: 1, stderr: 'Network statistics unavailable' };
+      return { code: 0, stdout: JSON.stringify(window.__test.networkStats ?? { id: 'wifi', received: 1410000000, sent: 353000000, gateway: '192.168.1.1', ping: 31 }) };
     }
     if (program === 'powershell.exe' && args[3]?.includes('class BluetoothMenu')) {
       calls.push(['bluetooth', program, args]);
@@ -244,10 +305,16 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       if (url.pathname === '/widgets/popup/globalprotect.mjs') {
         source = source.replace('const interval = setInterval', 'window.__refreshGlobalProtect = refresh; const interval = setInterval');
       }
+      if (url.pathname === '/widgets/popup/network.mjs') {
+        source = source.replace('const statsTimer = setInterval', 'window.__refreshNetworkStats = updateStats; const statsTimer = setInterval')
+          .replace('timeout: 15000', 'timeout: window.__test.networkQueryTimeout ?? 15000');
+      }
       if (url.pathname === '/widgets/popup/bluetooth.mjs') {
         source = source.replace('const statusTimer = setInterval', 'window.__refreshBluetoothStatus = () => run("status"); window.__scanBluetooth = () => run("scan"); const statusTimer = setInterval');
       }
       source = source.replaceAll('https://esm.sh/zebar@3.3.1', '/__mocks.mjs')
+        .replaceAll('https://esm.sh/@tauri-apps/api@2.0.2/core', '/__mocks.mjs')
+        .replaceAll('https://esm.sh/@tauri-apps/api@2.0.2/event', '/__mocks.mjs')
         .replaceAll('https://esm.sh/@tauri-apps/api@2.0.2/window', '/__mocks.mjs');
       response.setHeader('Content-Type', url.pathname.endsWith('.html') ? 'text/html'
         : url.pathname.endsWith('.css') ? 'text/css' : 'text/javascript');
@@ -348,6 +415,27 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
         if (vpn.available) assert.notEqual(await evaluate("getComputedStyle(document.getElementById('globalprotect-trigger')).display"), 'none');
       }
       assert.equal(await evaluate("getComputedStyle(document.getElementById('globalprotect-trigger')).color === getComputedStyle(document.getElementById('display-trigger')).color"), true);
+    });
+    await t.test('native VPN status restores the icon and never recolors the Network icon', async () => {
+      await evaluate(`localStorage.setItem('winarchy.network.vpn.v1', JSON.stringify({
+        time: Date.now(), value: { available: false, connected: false },
+      }));`);
+      await load('bar');
+      assert.equal(await evaluate("document.getElementById('globalprotect-trigger').hidden"), false,
+        'Successful native code:0 status must show the installed VPN client.');
+      const color = await evaluate(`(() => {
+        const icon = document.getElementById('network-trigger');
+        icon.getAnimations().forEach(animation => animation.finish());
+        return getComputedStyle(icon).color;
+      })()`);
+      await evaluate(`window.__test.data.network.defaultInterface = window.__test.data.network.interfaces[0];
+        window.__test.notify(); document.getElementById('network-trigger').getAnimations().forEach(animation => animation.finish());`);
+      assert.equal(await evaluate("getComputedStyle(document.getElementById('network-trigger')).color"), color);
+      await evaluate(`window.__test.data.network.defaultInterface = {
+        name: 'GlobalProtect', type: 'tunnel', ipv4Addresses: ['172.16.0.2'],
+      }; window.__test.notify(); document.getElementById('network-trigger').getAnimations().forEach(animation => animation.finish());`);
+      assert.equal(await evaluate("getComputedStyle(document.getElementById('network-trigger')).color"), color);
+      assert.equal(await evaluate("document.getElementById('network-trigger').classList.contains('is-vpn')"), false);
     });
     await t.test('focused workspace uses the same underline as open popups', async () => {
       await load('bar');
@@ -811,7 +899,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
           radius: getComputedStyle(document.body).borderRadius,
           sections: [...panel.querySelectorAll('h2')].map(node => node.textContent),
           flat: panel.querySelectorAll('.card, .stat, .badge, .details-grid').length === 0,
-          controls: panel.querySelectorAll('button, input').length,
+          controls: [...panel.querySelectorAll('button, input')].filter(node => node.getClientRects().length).length,
           vpn: panel.querySelector('.network-vpn'),
           fits: panel.scrollWidth <= panel.clientWidth && document.body.scrollHeight <= innerHeight,
         };
@@ -888,6 +976,48 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       })()`);
       assert(overflow.body <= overflow.height && overflow.width <= overflow.clientWidth,
         JSON.stringify(overflow));
+    });
+    await t.test('network updates retain focused address and native flyout buttons', async () => {
+      await load('network');
+      await evaluate('window.__refreshNetworkStats()');
+      for (const label of ['IP Address', 'Gateway']) {
+        await evaluate(`window.__focusedAddress = [...document.querySelectorAll('.network-traffic dt')]
+          .find(node => node.textContent === ${JSON.stringify(label)}).nextElementSibling.querySelector('button');
+          window.__focusedAddress.focus();`);
+        await evaluate(`window.__test.networkStats = { id: 'wifi', received: 1410001000, sent: 353000500,
+          gateway: '192.168.1.254', ping: 12 }; window.__refreshNetworkStats()`);
+        assert(await evaluate('document.activeElement === window.__focusedAddress && window.__focusedAddress.isConnected'));
+        await evaluate('window.__test.notify()');
+        assert(await evaluate('document.activeElement === window.__focusedAddress'));
+      }
+      await evaluate(`window.__flyoutButton = document.getElementById('wifi-settings-open');
+        window.__flyoutButton.focus(); window.__test.notify();`);
+      assert(await evaluate('document.activeElement === window.__flyoutButton && window.__flyoutButton.isConnected'));
+    });
+    await t.test('network statistics timeout kills the native query and permits recovery', async () => {
+      await load('network');
+      await evaluate('window.__refreshNetworkStats()');
+      await evaluate(`window.__test.networkQueryTimeout = 20; window.__test.holdNetworkStats = true;
+        window.__refreshNetworkStats()`);
+      assert.equal(await evaluate('window.__test.queryKills'), 1);
+      assert.match(await evaluate("document.querySelector('.network-traffic [role=status]').textContent"), /timed out/);
+      await evaluate('window.__test.holdNetworkStats = false; window.__test.networkQueryTimeout = 15000; window.__refreshNetworkStats()');
+      assert.equal(await evaluate("document.querySelector('.network-traffic [role=status]').hidden"), true);
+    });
+    await t.test('network statistics failures clear stale metrics and recover visibly', async () => {
+      await load('network');
+      await evaluate('window.__refreshNetworkStats()');
+      assert.match(await evaluate("document.querySelector('.network-traffic').textContent"), /31 ms/);
+      await evaluate('window.__test.failNetworkStats = true; window.__refreshNetworkStats()');
+      assert.match(await evaluate("document.querySelector('.network-traffic [role=status]').textContent"), /statistics unavailable/);
+      assert.equal(await evaluate("document.querySelector('.network-traffic [role=status]').hidden"), false);
+      assert.equal(await evaluate("document.querySelector('.network-traffic').textContent.includes('31 ms')"), false);
+      assert.equal(await evaluate("localStorage.getItem('winarchy.network.traffic.v1')"), null);
+      await evaluate('window.__test.failNetworkStats = false; window.__refreshNetworkStats()');
+      assert.equal(await evaluate("document.querySelector('.network-traffic [role=status]').hidden"), true);
+      assert.match(await evaluate("document.querySelector('.network-traffic').textContent"), /31 ms/);
+      const receiving = await evaluate("[...document.querySelectorAll('.network-traffic dt')].find(node => node.textContent === 'Receiving').nextElementSibling.textContent");
+      assert.equal(receiving, '--', 'Recovery starts a fresh rate baseline.');
     });
     await t.test('VPN action hover stays aligned with the icon and centered switch track', async () => {
       await load('globalprotect');

@@ -39,14 +39,9 @@ export function startNetworkBackground(exec, getNetwork, { storage, interval = 3
     }, storage, now());
     const queries = [
       (async () => {
-        let timeout;
-        let result;
-        try {
-          result = await Promise.race([
-            exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', networkStatsCommand]),
-            new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('Network statistics query timed out.')), 15000); }),
-          ]);
-        } finally { clearTimeout(timeout); }
+        const result = await exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', networkStatsCommand], {
+          timeout: 15000, timeoutMessage: 'Network statistics query timed out.',
+        });
         if ((result.code ?? result.exitCode) !== 0) throw new Error(result.stderr || 'Network statistics unavailable.');
         const snapshot = JSON.parse(result.stdout.replace(/^\uFEFF/, '').trim());
         if (stopped) return;

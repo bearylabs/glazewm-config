@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { executeGlobalProtect, globalProtectArgs, globalProtectArgsRegex } from '../widgets/shared/globalprotect-model.mjs';
+import { createShellQueryExecutor } from '../widgets/shared/shell-query.mjs';
 
 test('GlobalProtect permissions match only fixed status/open/connect/disconnect/hide commands', async () => {
   const pack = JSON.parse(await readFile(new URL('../zpack.json', import.meta.url), 'utf8'));
@@ -83,7 +84,13 @@ test('status validates booleans and supports split-tunnel adapter detection', as
 });
 
 test('read-only status queries time out instead of leaving controls stuck', async () => {
-  await assert.rejects(executeGlobalProtect(() => new Promise(() => {}), 'status', 5), /timed out/);
+  let killed = false;
+  const query = createShellQueryExecutor(async () => ({
+    onStdout() {}, onStderr() {}, onExit() {},
+  }), async () => { killed = true; });
+  await assert.rejects(executeGlobalProtect(query, 'status', 5), /timed out/);
+  await new Promise(resolve => setImmediate(resolve));
+  assert(killed);
 });
 
 test('click delivery is only a request, not fabricated connection success', async () => {

@@ -8,29 +8,59 @@ import { readBackgroundSnapshot } from '../shared/network-background.mjs';
 import { onPopupSessionEnd } from '../shared/popup-session.mjs';
 import { element, button, hero, unavailable } from './dom.mjs';
 import { subscribe } from './providers.mjs';
+import { createIcon } from '../shared/icons.mjs';
+import { shellQuery } from '../shared/native-query.mjs';
 
 function networkDetails(entries, reportError) {
   const list = element('dl', undefined, 'network-details network-overview');
-  for (const [label, value] of networkOverviewEntries(entries)) {
+  const values = new Map();
+  for (const [label] of networkOverviewEntries(entries)) {
     const item = element('div');
-    const displayValue = value ?? 'Unavailable';
     const description = element('dd');
-    if (['IP Address', 'Gateway'].includes(label) && value && !['--', 'Unavailable'].includes(value)) {
-      const copy = button(displayValue, () => {
-        void Promise.resolve().then(() => navigator.clipboard.writeText(String(value))).then(() => {
+    const text = element('span');
+    description.append(text);
+    let currentValue;
+    let copy;
+    if (['IP Address', 'Gateway'].includes(label)) {
+      copy = button('', () => {
+        const address = currentValue;
+        void Promise.resolve().then(() => navigator.clipboard.writeText(String(address))).then(() => {
+          if (address !== currentValue) return;
           copy.title = 'Copied to clipboard';
-          copy.setAttribute('aria-label', `${label} ${value} copied to clipboard`);
+          copy.setAttribute('aria-label', `${label} ${address} copied to clipboard`);
         }).catch(reportError);
       });
       copy.className = 'network-copy';
-      copy.title = `Copy ${label}: ${value}`;
-      copy.setAttribute('aria-label', copy.title);
       description.append(copy);
-    } else description.textContent = displayValue;
+    }
+    values.set(label, next => {
+      const changed = currentValue !== next;
+      currentValue = next;
+      const canCopy = Boolean(copy && next && !['--', 'Unavailable'].includes(next));
+      text.textContent = canCopy ? '' : next ?? 'Unavailable';
+      text.hidden = canCopy;
+      if (copy) {
+        copy.hidden = !canCopy;
+        copy.disabled = !canCopy;
+        copy.textContent = canCopy ? next : '';
+        if (!canCopy) {
+          copy.removeAttribute('title');
+          copy.removeAttribute('aria-label');
+        } else if (changed) {
+          copy.title = `Copy ${label}: ${next}`;
+          copy.setAttribute('aria-label', copy.title);
+        }
+      }
+    });
     item.append(element('dt', label), description);
     list.append(item);
   }
-  return list;
+  function update(next) {
+    const entries = new Map(next);
+    for (const [label, render] of values) render(entries.get(label));
+  }
+  update(entries);
+  return { list, update };
 }
 
 export function renderNetwork(root, reportError) {
@@ -41,7 +71,12 @@ export function renderNetwork(root, reportError) {
   let liveNetworkSeen = false;
   const connection = element('div', undefined, 'network-connection');
   const traffic = element('div', undefined, 'network-traffic');
-  traffic.append(networkDetails(cachedTraffic?.entries ?? networkMetrics(null), reportError));
+  const emptyEntries = () => [...networkMetrics(null), ['IP Address', '--'], ['Link rate', '--']];
+  const trafficDetails = networkDetails(cachedTraffic?.entries ?? emptyEntries(), reportError);
+  const statsError = element('p', undefined, 'note error');
+  statsError.setAttribute('role', 'status');
+  statsError.hidden = true;
+  traffic.append(trafficDetails.list, statsError);
   let wifiOpening = false;
   const wifiOpen = button('', () => {
     if (wifiOpening) return;
@@ -69,6 +104,16 @@ export function renderNetwork(root, reportError) {
   arrow.setAttribute('stroke-linejoin', 'round');
   arrowIcon.append(arrow);
   wifiOpen.append(arrowIcon);
+  const heading = hero('wifi-off', 'No connection', 'NETWORK DATA UNAVAILABLE');
+  heading.classList.add('network-hero');
+  const networkTitle = heading.querySelector('.hero__title');
+  networkTitle.id = 'network-title';
+  heading.append(wifiOpen);
+  const ethernetDetails = networkDetails([['IP Address', '--']], reportError);
+  ethernetDetails.list.hidden = true;
+  const connectionError = unavailable('Network');
+  connectionError.hidden = true;
+  connection.append(heading, ethernetDetails.list, connectionError);
   root.append(connection, traffic);
   let previousStats = cachedTraffic?.snapshot ?? null;
   let previousTime = cachedTraffic?.time ?? 0;
@@ -77,9 +122,10 @@ export function renderNetwork(root, reportError) {
   let statsClosed = false;
   let latestStats = cachedTraffic?.snapshot ?? null;
   let latestInterface = null;
+  let connectionTitle = 'No connection';
   function updateWifiLabels() {
-    const title = connection.querySelector('#network-title');
-    if (latestStats?.ssid && title && latestInterface && /wifi|wireless|802\.11/i.test(latestInterface.type ?? '')) { title.textContent = latestStats.ssid; }
+    networkTitle.textContent = latestStats?.ssid && latestInterface && /wifi|wireless|802\.11/i.test(latestInterface.type ?? '')
+      ? latestStats.ssid : connectionTitle;
   }
   async function updateStats() {
     if (statsBusy || statsClosed) return;
@@ -90,14 +136,16 @@ export function renderNetwork(root, reportError) {
       if (backgroundTraffic) {
         latestStats = backgroundTraffic.snapshot;
         previousStats = backgroundTraffic.snapshot; previousTime = backgroundTraffic.time;
-        traffic.replaceChildren(networkDetails(backgroundTraffic.entries, reportError));
+        trafficDetails.update(backgroundTraffic.entries);
         updateWifiLabels();
         return;
       }
-      const result = await zebar.shellExec('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', networkStatsCommand]);
+      const result = await shellQuery('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', networkStatsCommand], {
+        timeout: 15000, timeoutMessage: 'Network statistics query timed out.',
+      });
       if (statsClosed) return;
       if ((result.code ?? result.exitCode) !== 0) throw new Error(result.stderr || 'Network statistics unavailable.');
-      const snapshot = JSON.parse(result.stdout.trim());
+      const snapshot = JSON.parse(result.stdout.replace(/^\uFEFF/, '').trim());
       latestStats = snapshot;
       updateWifiLabels();
       const now = Date.now();
@@ -106,11 +154,24 @@ export function renderNetwork(root, reportError) {
         ['IP Address', ipv4(latestInterface) || '--'],
         ['Link rate', linkRate(latestInterface) || '--'],
       ];
-      traffic.replaceChildren(networkDetails(entries, reportError));
+      trafficDetails.update(entries);
+      statsError.hidden = true;
+      statsError.textContent = '';
       if (snapshot) writeSnapshot(trafficCacheKey, { snapshot, time: now, entries });
       else clearSnapshot(trafficCacheKey);
       previousStats = snapshot; previousTime = now;
-    } catch (error) { console.warn('Network statistics:', error.message); }
+    } catch (error) {
+      if (!statsClosed) {
+        latestStats = null;
+        previousStats = null;
+        previousTime = 0;
+        clearSnapshot(trafficCacheKey);
+        trafficDetails.update(emptyEntries());
+        updateWifiLabels();
+        statsError.textContent = `Network statistics: ${error.message ?? error}`;
+        statsError.hidden = false;
+      }
+    }
     finally { statsBusy = false; }
   }
   void updateStats();
@@ -123,13 +184,11 @@ export function renderNetwork(root, reportError) {
     statsClosed = true; clearInterval(statsTimer);
     window.removeEventListener('storage', onNetworkStorage);
   });
-  function heading(icon, title, meta) {
-    const node = hero(icon, title, meta);
-    node.classList.add('network-hero');
-    const label = node.querySelector('.hero__title');
-    label.id = 'network-title';
-    node.append(wifiOpen);
-    return node;
+  function updateHeading(icon, title, meta) {
+    heading.querySelector('.hero__icon').replaceChildren(createIcon(icon));
+    connectionTitle = title;
+    heading.querySelector('.hero__meta').textContent = meta;
+    updateWifiLabels();
   }
   subscribe({ network: { type: 'network', refreshInterval: 1000 } }, (output, errors) => {
     if (output.network || errors.network) liveNetworkSeen = true;
@@ -143,24 +202,25 @@ export function renderNetwork(root, reportError) {
       if (liveNetworkSeen) { clearSnapshot(networkCacheKey); clearSnapshot(trafficCacheKey); }
       traffic.hidden = true;
       latestInterface = null;
-      connection.replaceChildren(heading('wifi-off', 'No connection', 'NETWORK DATA UNAVAILABLE'), unavailable('Network', errors.network));
+      ethernetDetails.list.hidden = true;
+      connectionError.hidden = false;
+      connectionError.textContent = errors.network ? `Network: ${errors.network.message ?? errors.network}` : 'Network: waiting for data...';
+      connectionError.className = errors.network ? 'error' : 'note';
+      updateHeading('wifi-off', 'No connection', 'NETWORK DATA UNAVAILABLE');
       return;
     }
     const { iface, link } = networkConnection(net);
     const kind = link === 'none' ? 'No physical connection' : link === 'wifi' ? 'Wi-Fi' : 'Ethernet';
-    const name = link === 'wifi' ? latestStats?.ssid || net.defaultGateway?.ssid || iface?.friendlyName || iface?.name : kind;
+    const name = link === 'wifi' ? net.defaultGateway?.ssid || iface?.friendlyName || iface?.name : kind;
     const rate = linkRate(iface);
-    const nodes = [
-      heading(link === 'wifi' ? 'wifi' : link === 'ethernet' ? 'ethernet' : 'wifi-off',
-        link === 'ethernet' && rate ? `${name} (${rate})` : name || kind, link === 'none' ? 'NOT CONNECTED' : `${kind.toUpperCase()} CONNECTION`),
-    ];
     latestInterface = iface;
-    if (iface && link !== 'wifi') nodes.push(networkDetails([
-      ['IP Address', ipv4(iface) || '--'],
-    ], reportError));
+    updateHeading(link === 'wifi' ? 'wifi' : link === 'ethernet' ? 'ethernet' : 'wifi-off',
+      link === 'ethernet' && rate ? `${name} (${rate})` : name || kind, link === 'none' ? 'NOT CONNECTED' : `${kind.toUpperCase()} CONNECTION`);
+    ethernetDetails.list.hidden = !iface || link === 'wifi';
+    ethernetDetails.update([['IP Address', ethernetDetails.list.hidden ? '--' : ipv4(iface) || '--']]);
     traffic.hidden = link !== 'wifi';
-    if (errors.network) nodes.push(unavailable('Network', errors.network));
-    connection.replaceChildren(...nodes);
-    updateWifiLabels();
+    connectionError.hidden = !errors.network;
+    connectionError.textContent = errors.network ? `Network: ${errors.network.message ?? errors.network}` : '';
+    connectionError.className = 'error';
   });
 }

@@ -7,6 +7,7 @@ import { startBluetoothBackground } from '../shared/bluetooth-background.mjs';
 import { createBarZOrder } from '../shared/bar-z-order.mjs';
 import { createAudioOwner } from '../shared/audio-bridge.mjs';
 import { readSnapshot, vpnSnapshotValid } from '../shared/snapshot-cache.mjs';
+import { shellQuery } from '../shared/native-query.mjs';
 
 for (const [id, icons] of Object.entries({
   split: [['split-horizontal', 'split__horizontal'], ['split-vertical', 'split__vertical']],
@@ -86,9 +87,9 @@ window.addEventListener('storage', event => {
     if (vpn) renderVpn(vpn);
   }
 });
-const stopNetworkBackground = startNetworkBackground(zebar.shellExec, () => providers.outputMap.network, { onVpn: renderVpn });
+const stopNetworkBackground = startNetworkBackground(shellQuery, () => providers.outputMap.network, { onVpn: renderVpn });
 window.addEventListener('pagehide', stopNetworkBackground, { once: true });
-const stopBluetoothBackground = startBluetoothBackground(zebar.shellExec);
+const stopBluetoothBackground = startBluetoothBackground(shellQuery);
 window.addEventListener('pagehide', stopBluetoothBackground, { once: true });
 const timeEl = document.getElementById('time');
 const workspacesEl = document.getElementById('workspaces');
@@ -159,7 +160,6 @@ function renderVolume(audio) {
 function renderNetwork(net) {
   const { tunnel, iface, link } = networkConnection(net);
   networkEl.dataset.link = link;
-  networkEl.classList.toggle('is-vpn', Boolean(tunnel));
   networkEl.setAttribute('aria-label', !net ? 'Network -- data unavailable' : [
     link === 'none' ? 'No physical link' : link === 'wifi' ? 'Wi-Fi' : 'Ethernet',
     iface?.friendlyName ?? iface?.name,

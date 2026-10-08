@@ -130,7 +130,6 @@ button:focus-visible { outline: 1px solid var(--ctp-lavender); outline-offset: -
 .status--network[data-link='wifi'] .net__wifi,
 .status--network[data-link='ethernet'] .net__ethernet,
 .status--network[data-link='none'] .net__none { display: block; }
-.status--network.is-vpn { color: var(--ctp-mauve); }
 .status--network[data-link='none'] { color: var(--ctp-red); }
 .status--power { color: var(--ctp-subtext0); }
 .status--power[data-state='critical'] { color: var(--ctp-red); }
