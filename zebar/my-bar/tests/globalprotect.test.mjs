@@ -41,6 +41,35 @@ test('hide never opens or clicks the client and targets only its verified main p
   assert(!command.includes('Stop-Process'));
 });
 
+test('connect and disconnect place only the verified main window beside the visible Zebar popup', () => {
+  const command = globalProtectArgs('connect')[3];
+  assert.match(command, /FindWindow\(null, "Zebar - my-bar \/ popup"\)/);
+  assert.match(command, /!IsWindowVisible\(popup\)/);
+  assert.match(command, /process\.ProcessName, "zebar"/);
+  assert.match(command, /SetThreadDpiAwarenessContext\(new IntPtr\(-4\)\)/);
+  assert.match(command, /finally \{ SetThreadDpiAwarenessContext\(previous\); \}/);
+  assert.match(command, /Screen\.FromHandle\(popup\)\.WorkingArea/);
+  assert.match(command, /p\.Right \+ gap/);
+  assert.match(command, /p\.Left - gap - width/);
+  assert.match(command, /p\.Bottom \+ gap/);
+  assert.match(command, /p\.Top - gap - height/);
+  assert.match(command, /if \(!area\.Contains\(target\)\) continue/);
+  assert.match(command, /SetWindowPos\(client, IntPtr\.Zero, target\.X, target\.Y, 0, 0, 0x0015\)/);
+  assert.match(command, /if \(\$action -eq 'connect' -or \$action -eq 'disconnect'\)/);
+  const placement = command.indexOf('$placementWarning = [GlobalProtectButton]::PlaceBesidePopup');
+  const click = command.indexOf('$sent = [GlobalProtectButton]::SendMessageTimeout');
+  assert(placement < click);
+  assert(command.indexOf('GlobalProtect state changed after placement', placement) < click);
+  assert.match(command, /catch \{ \$placementWarning = \$_\.Exception\.GetBaseException\(\)\.Message \}/);
+  assert.match(command, /requested = \$action; placementWarning = \$placementWarning/);
+});
+
+test('placement warnings preserve the accepted VPN action response', async () => {
+  const response = await executeGlobalProtect(async () => ({ code: 0, stdout: '{"requested":"connect","placementWarning":"No room"}' }), 'connect');
+  assert.equal(response.requested, 'connect');
+  assert.equal(response.placementWarning, 'No room');
+});
+
 test('status validates booleans and supports split-tunnel adapter detection', async () => {
   const calls = [];
   const data = await executeGlobalProtect(async (...args) => {

@@ -143,11 +143,14 @@ export function renderGlobalProtect(root, reportError) {
     render();
     try {
       if (action !== 'open') releaseRetention = retainPopupDuringInteraction();
-      await executeGlobalProtect(zebar.shellExec, action);
+      const response = await executeGlobalProtect(zebar.shellExec, action);
       if (stopped) return;
       if (action !== 'open') {
         clearSnapshot(cacheKey);
         pending = { connected: action === 'connect', dismissClient: true, deadline: Date.now() + 120000 };
+        if (response.placementWarning) {
+          reportError(new Error(`VPN action requested, but the client window could not be placed beside the popup: ${response.placementWarning}`));
+        }
       }
     } catch (failure) {
       finishPending();
