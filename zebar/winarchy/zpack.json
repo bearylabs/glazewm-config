@@ -86,14 +86,6 @@
       "privileges": {
         "shellCommands": [
           {
-            "program": "shutdown",
-            "argsRegex": "^(/l|/s /t 0)$"
-          },
-          {
-            "program": "rundll32.exe",
-            "argsRegex": "^user32\\.dll,LockWorkStation$"
-          },
-          {
             "program": "powershell.exe",
             "argsRegex": "^-NoProfile -NonInteractive -Command \\$ErrorActionPreference = 'Stop'; Add-Type -TypeDefinition 'using System;\nusing System\\.Runtime\\.InteropServices;\n\\[ComImport, Guid\\(\"870af99c-171d-4f9e-af0d-e63df40c2bc9\"\\)\\] class PolicyConfigClient \\{\\}\n\\[ComImport, Guid\\(\"f8679f50-850a-41cf-9c72-430f290290c8\"\\), InterfaceType\\(ComInterfaceType\\.InterfaceIsIUnknown\\)\\]\ninterface IPolicyConfig \\{\n  void GetMixFormat\\(\\); void GetDeviceFormat\\(\\); void ResetDeviceFormat\\(\\); void SetDeviceFormat\\(\\);\n  void GetProcessingPeriod\\(\\); void SetProcessingPeriod\\(\\); void GetShareMode\\(\\); void SetShareMode\\(\\);\n  void GetPropertyValue\\(\\); void SetPropertyValue\\(\\);\n  \\[PreserveSig\\] int SetDefaultEndpoint\\(\\[MarshalAs\\(UnmanagedType\\.LPWStr\\)\\] string id, int role\\);\n\\}\npublic class AudioOutput \\{\n  public static void Select\\(string id\\) \\{\n    var policy = \\(IPolicyConfig\\)new PolicyConfigClient\\(\\);\n    try \\{ for \\(int role = 0; role < 3; role\\+\\+\\) Marshal\\.ThrowExceptionForHR\\(policy\\.SetDefaultEndpoint\\(id, role\\)\\); \\}\n    finally \\{ Marshal\\.ReleaseComObject\\(policy\\); \\}\n  \\}\n\\}'; \\[AudioOutput\\]::Select\\('\\{0\\.0\\.0\\.00000000\\}\\.\\{[0-9a-fA-F-]{36}\\}'\\)$"
           },

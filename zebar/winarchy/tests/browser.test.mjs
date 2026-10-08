@@ -114,13 +114,6 @@ const mocks = `
       if (action !== 'status') return { code: 0, stdout: JSON.stringify({ requested: action }) };
       return { code: 0, stdout: JSON.stringify(window.__test.globalprotect ?? { available: true, connected: false }) };
     }
-    if (program === 'powershell.exe' && args[3]?.includes('Windows.Devices.Radios.Radio]::GetRadiosAsync')) {
-      const action = args[3].match(/\\$action = '([^']+)'/)[1];
-      calls.push(['wifi-radio', action]);
-      if (window.__test.failWifiRadio) return { code: 1, stderr: 'Windows denied Wi-Fi radio access' };
-      if (action !== 'status') window.__test.wifiEnabled = action === 'on';
-      return { code: 0, stdout: JSON.stringify({ available: true, enabled: window.__test.wifiEnabled ?? true }) };
-    }
     if (program === 'powershell.exe' && args[3]?.includes('$nic.GetIPv4Statistics()')) {
       return { code: 0, stdout: JSON.stringify({ id: 'wifi', received: 1410000000, sent: 353000000, gateway: '192.168.1.1', ping: 31 }) };
     }
@@ -244,7 +237,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       if (url.pathname === '/__mocks.mjs') source = mocks;
       else if (url.pathname.endsWith('/popup-controller.mjs')) source = controllerMock;
       else source = await readFile(filename, 'utf8');
-      if (url.pathname === '/widgets/bar/index.html') {
+      if (url.pathname === '/widgets/bar/bar.mjs') {
         source = source.replace('const powerTimer = setInterval(refreshPower, 10000);',
           'window.__refreshPower = refreshPower; const powerTimer = setInterval(refreshPower, 10000);');
       }
@@ -256,7 +249,8 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       }
       source = source.replaceAll('https://esm.sh/zebar@3.3.1', '/__mocks.mjs')
         .replaceAll('https://esm.sh/@tauri-apps/api@2.0.2/window', '/__mocks.mjs');
-      response.setHeader('Content-Type', url.pathname.endsWith('.html') ? 'text/html' : 'text/javascript');
+      response.setHeader('Content-Type', url.pathname.endsWith('.html') ? 'text/html'
+        : url.pathname.endsWith('.css') ? 'text/css' : 'text/javascript');
       response.end(source);
     } catch (error) {
       response.writeHead(404).end(error.message);
@@ -302,6 +296,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
         await pause(25);
       }
       assert(ready, `${type} must initialize without module errors`);
+      await evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
       if (type === 'audio') {
         for (let attempt = 0; attempt < 100; attempt++) {
           if (await evaluate("!document.getElementById('volume-slider').disabled")) break;
@@ -345,7 +340,8 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
         { available: true, connected: true },
       ]) {
         await evaluate(`localStorage.setItem('winarchy.network.vpn.v1', JSON.stringify({ time: Date.now(), value: ${JSON.stringify(vpn)} }));
-          window.dispatchEvent(new StorageEvent('storage', { key: 'winarchy.network.vpn.v1' }));`);
+          window.dispatchEvent(new StorageEvent('storage', { key: 'winarchy.network.vpn.v1' }));
+          document.getElementById('globalprotect-trigger').getAnimations().forEach(animation => animation.finish());`);
         assert.equal(await evaluate("document.getElementById('globalprotect-trigger').hidden"), !vpn.available);
         assert.equal(await evaluate("document.getElementById('globalprotect-trigger').classList.contains('is-muted')"), !vpn.connected);
         assert.equal(await evaluate("getComputedStyle(document.querySelector('#globalprotect-trigger .vpn__slash')).display !== 'none'"), !vpn.connected);
@@ -403,7 +399,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       await load('bar');
       assert(await evaluate(`(() => {
         const icons = [...document.querySelectorAll('.status svg, .split svg')];
-        return icons.length === 10 && icons.every(icon =>
+        return icons.length === 11 && icons.every(icon =>
           icon.getAttribute('fill') === 'currentColor' && !icon.hasAttribute('stroke') &&
           icon.getAttribute('aria-hidden') === 'true' && getComputedStyle(icon).width === '16px');
       })()`));
@@ -436,14 +432,14 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert.match(await evaluate("document.getElementById('audio-trigger').getAttribute('aria-label')"), /43%/);
       assert.deepEqual(await evaluate(`[
         ...document.querySelectorAll('.zone--center [title], .zone--right [title]')
-      ].map(node => node.id)`), []);
+      ].map(node => node.id)`), ['globalprotect-trigger']);
     });
     await t.test('battery icon shows AC, low, mid, full and unavailable status', async () => {
       await load('bar');
       assert.equal(await evaluate("document.getElementById('power-trigger').dataset.state"), 'ac');
       // The test server exposes the real polling callback without a ten-second wait.
       for (const [ac, charge, battery, expected] of [
-        ['Offline', 0, 'Critical', 'low'], ['Offline', 0.2, 'Low', 'low'],
+        ['Offline', 0, 'Critical', 'critical'], ['Offline', 0.2, 'Low', 'low'],
         ['Offline', 0.21, 'High', 'mid'], ['Offline', 0.79, 'High', 'mid'],
         ['Offline', 0.8, 'High', 'full'], ['Offline', 1, 'High', 'full'],
         ['Online', 0.15, 'Charging', 'ac'], ['Online', 1, 'High', 'ac'],
@@ -575,16 +571,17 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       await load('bluetooth');
       await pause(100);
       await evaluate(`window.__test.bluetooth = { available: true, enabled: true, devices: [] }; window.__scanBluetooth()`);
-      assert.equal(await evaluate("document.querySelectorAll('.bluetooth-section:not([hidden])').length"), 0);
+      assert.equal(await evaluate("document.querySelectorAll('.bluetooth-section:not([hidden])').length"), 2);
+      assert.equal(await evaluate("document.querySelector('[data-device-id=available]')"), null);
       await evaluate('window.__test.holdBluetoothScan = true; void window.__scanBluetooth()');
       await pause(50);
-      assert.equal(await evaluate("document.querySelectorAll('.bluetooth-section:not([hidden])').length"), 0);
+      assert.equal(await evaluate("document.querySelectorAll('.bluetooth-section:not([hidden])').length"), 2);
       assert.equal(await evaluate("document.querySelector('#bluetooth-status').textContent"), '');
       await evaluate(`window.__test.resolveBluetoothScan({ available: true, enabled: true, devices: [
         { id: 'new', name: 'New mouse', paired: false, connected: false },
       ] })`);
       await pause(100);
-      assert.equal(await evaluate("document.querySelector('.bluetooth-section:not([hidden]) h2').textContent"), 'Available');
+      assert.equal(await evaluate("document.querySelector('[data-device-id=new]').closest('.bluetooth-section').querySelector('h2').textContent"), 'Available');
       assert.equal(await evaluate("document.querySelector('[data-device-id=new] .bluetooth-name').textContent"), 'New mouse');
     });
     await t.test('Bluetooth status refresh updates paired rows without disabling them or replacing nearby devices', async () => {
@@ -964,7 +961,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
         window.__test.notify(); window.__refreshGlobalProtect()`);
       assert.equal(await evaluate("document.getElementById('globalprotect-toggle').getAttribute('aria-label')"), 'Disconnect GlobalProtect');
       assert.equal(await evaluate("document.getElementById('globalprotect-toggle').getAttribute('aria-checked')"), 'true');
-      assert.equal(await evaluate("getComputedStyle(document.querySelector('.network-vpn__row')).backgroundColor"), 'rgba(0, 0, 0, 0)');
+      assert.equal(await evaluate("getComputedStyle(document.querySelector('.network-vpn .network-section__heading')).backgroundColor"), 'rgba(0, 0, 0, 0)');
       assert(await evaluate("document.querySelector('.network-vpn .note').hidden"));
       assert.equal(await evaluate('window.__test.retained'), false);
       await evaluate("document.getElementById('globalprotect-toggle').click()");

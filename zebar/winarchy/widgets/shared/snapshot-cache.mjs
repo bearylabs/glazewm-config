@@ -16,9 +16,6 @@ export function writeSnapshot(key, value, storage = localStorageOrNull(), now = 
 export function clearSnapshot(key, storage = localStorageOrNull()) {
   try { storage?.removeItem(key); } catch { /* Optional cache. */ }
 }
-export function radioSnapshotValid(value) {
-  return value && typeof value.available === 'boolean' && typeof value.enabled === 'boolean';
-}
 export function vpnSnapshotValid(value) {
   return value && typeof value.available === 'boolean' && typeof value.connected === 'boolean';
 }

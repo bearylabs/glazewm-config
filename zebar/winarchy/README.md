@@ -6,6 +6,23 @@ Omarchy-inspired desktop bar for Windows, powered by Zebar.
 
 `zebar/settings.json` selects `winarchy / bar / default` as the only startup widget. GlazeWM launches Zebar on startup and stops it on shutdown; the existing Windows GlazeWM autostart therefore also starts Winarchy after sign-in. Restarting Zebar or GlazeWM loads Winarchy automatically. The popup is preloaded by the bar, not separately configured as a startup widget.
 
+## Source layout
+
+The widget HTML files contain markup only. `widgets/bar/bar.css` and
+`widgets/bar/bar.mjs` own the bar's styles and behavior. The reusable popup loads
+`widgets/popup/popup.css` and `widgets/popup/bootstrap.mjs`, which resets the
+session DOM and starts the calendar or system dispatcher.
+
+`widgets/popup/system.mjs` dispatches to the individual Audio, Network, Battery,
+Bluetooth, Display and GlobalProtect renderers. Shared popup DOM helpers live in
+`dom.mjs`; `providers.mjs` handles session-scoped provider subscriptions. Models,
+native bridges, caches and window lifecycle helpers remain under `widgets/shared`.
+All assets are included by the existing widget file globs; no build step is needed.
+
+Obsolete system/drive rendering and session-action helpers, styles and permissions
+have been removed. Restart Zebar after updating to unload the old shutdown,
+logout and lock permissions.
+
 ## Bar background
 
 The bar uses Catppuccin Mocha Base (`#1e1e2e`). Its native window stays topmost so neighboring window shadows cannot darken the background when focus changes. GlazeWM fullscreen temporarily switches it to the normal layer so fullscreen can still cover the bar. Workspace highlights are unchanged. Restart Zebar after changing the initial layer in `zpack.json`.

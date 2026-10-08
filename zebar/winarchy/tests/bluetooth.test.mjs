@@ -49,7 +49,7 @@ test('paired cache is immediate, excludes nearby devices and tolerates invalid o
 
 test('Bluetooth permission matches fixed scripts and encoded IDs but rejects injected commands', async () => {
   const pack = JSON.parse(await readFile(new URL('../zpack.json', import.meta.url), 'utf8'));
-  const permission = pack.widgets.find(w => w.name === 'popup').privileges.shellCommands[3];
+  const permission = pack.widgets.find(w => w.name === 'popup').privileges.shellCommands.find(p => p.argsRegex === bluetoothArgsRegex());
   assert.deepEqual(permission, { program: 'powershell.exe', argsRegex: bluetoothArgsRegex() });
   const allowed = new RegExp(permission.argsRegex);
   for (const action of ['status', 'scan', 'on', 'off', 'pair', 'connect', 'disconnect', 'forget']) {
@@ -97,7 +97,7 @@ test('audio reconnect uses valid SDK interfaces and verifies active endpoints', 
 
 test('recovery settings launcher has one narrowly allowed URI and reports failures', async () => {
   const pack = JSON.parse(await readFile(new URL('../zpack.json', import.meta.url), 'utf8'));
-  const permission = pack.widgets.find(w => w.name === 'popup').privileges.shellCommands[4];
+  const permission = pack.widgets.find(w => w.name === 'popup').privileges.shellCommands.find(p => p.argsRegex === bluetoothSettingsPermission.argsRegex);
   assert.deepEqual(permission, bluetoothSettingsPermission);
   assert(new RegExp(permission.argsRegex).test('ms-settings:bluetooth'));
   for (const args of ['ms-settings:bluetooth extra', 'ms-settings:appsfeatures', 'cmd.exe', 'ms-settings:bluetooth; shutdown /s']) {

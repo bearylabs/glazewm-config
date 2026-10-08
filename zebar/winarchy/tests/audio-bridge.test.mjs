@@ -154,8 +154,8 @@ test('missing owner fails closed, then recovers without creating a native provid
 });
 
 test('popup source no longer subscribes to the shared native audio provider', async () => {
-  const popup = await readFile(new URL('../widgets/popup/system.mjs', import.meta.url), 'utf8');
-  const bar = await readFile(new URL('../widgets/bar/index.html', import.meta.url), 'utf8');
+  const popup = await readFile(new URL('../widgets/popup/audio.mjs', import.meta.url), 'utf8');
+  const bar = await readFile(new URL('../widgets/bar/bar.mjs', import.meta.url), 'utf8');
   assert.doesNotMatch(popup, /subscribe\(\{\s*audio:/);
   assert.match(popup, /createAudioClient/);
   assert.match(bar, /audio: \{ type: 'audio' \}/);

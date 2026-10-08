@@ -14,7 +14,7 @@ const monitor = (x, y, width, height, scaleFactor = 1, name = 'display') => ({
   name, position: { x, y }, size: { width, height }, scaleFactor,
 });
 
-test('popup owns narrowly scoped power privileges without changing bar docking', async () => {
+test('popup owns only active control privileges without changing bar docking', async () => {
   const pack = JSON.parse(await readFile(new URL('../zpack.json', import.meta.url), 'utf8'));
   const bar = pack.widgets.find(widget => widget.name === 'bar');
   const popup = pack.widgets.find(widget => widget.name === 'popup');
@@ -32,21 +32,18 @@ test('popup owns narrowly scoped power privileges without changing bar docking',
   const mousePermission = new RegExp(bar.privileges.shellCommands[1].argsRegex);
   assert(mousePermission.test(outsideClickArgs.join(' ')));
   assert(!mousePermission.test(`${outsideClickArgs.join(' ')}; shutdown /s /t 0`));
-  assert.deepEqual(popup.privileges.shellCommands.slice(0, 2), [
-    { program: 'shutdown', argsRegex: '^(/l|/s /t 0)$' },
-    { program: 'rundll32.exe', argsRegex: '^user32\\.dll,LockWorkStation$' },
-  ]);
-  assert.deepEqual(popup.privileges.shellCommands[2], {
+  assert(!popup.privileges.shellCommands.some(permission => ['shutdown', 'rundll32.exe'].includes(permission.program)));
+  assert.deepEqual(popup.privileges.shellCommands[0], {
     program: 'powershell.exe', argsRegex: outputDeviceArgsRegex(),
   });
-  assert.deepEqual(popup.privileges.shellCommands[3], {
+  assert.deepEqual(popup.privileges.shellCommands[1], {
     program: 'powershell.exe', argsRegex: bluetoothArgsRegex(),
   });
-  assert.deepEqual(popup.privileges.shellCommands[4], bluetoothSettingsPermission);
-  assert.deepEqual(popup.privileges.shellCommands[5], {
+  assert.deepEqual(popup.privileges.shellCommands[2], bluetoothSettingsPermission);
+  assert.deepEqual(popup.privileges.shellCommands[3], {
     program: 'powershell.exe', argsRegex: globalProtectArgsRegex(),
   });
-  assert.equal(popup.privileges.shellCommands.length, 9);
+  assert.equal(popup.privileges.shellCommands.length, 7);
   assert.equal(bar.presets[0].height, '28px');
   assert.equal(bar.presets[0].dockToEdge.enabled, true);
   assert.deepEqual(bar.presets[0].monitorSelection, { type: 'all' });
@@ -827,13 +824,13 @@ test('native positioning rounds fractional physical coordinates at mixed DPI', a
 test('popup stays transparent until native sizing and the resized frame are ready', async () => {
   const popup = await popupHarness();
   assert.deepEqual(popup.lifecycle, ['position', 'size', 'size', 'position', 'show', 'frame', 'frame', 'visible', 'ready']);
-  const html = await readFile(new URL('../widgets/popup/index.html', import.meta.url), 'utf8');
-  const initialBody = html.match(/\n      body \{([\s\S]*?)\n      \}/)?.[1];
+  const css = await readFile(new URL('../widgets/popup/popup.css', import.meta.url), 'utf8');
+  const initialBody = css.match(/\nbody \{([\s\S]*?)\n\}/)?.[1];
   assert.match(initialBody, /background: transparent/);
   assert.match(initialBody, /border: 1px solid transparent/);
   assert.match(initialBody, /opacity: 0/);
   assert.match(initialBody, /pointer-events: none/);
-  assert.match(html, /html\[data-popup-ready='true'\] body/);
+  assert.match(css, /html\[data-popup-ready='true'\] body/);
   assert.deepEqual(popup.errors, []);
 });
 

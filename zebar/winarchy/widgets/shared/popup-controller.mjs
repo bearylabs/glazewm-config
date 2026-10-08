@@ -326,10 +326,6 @@ export function attachPopupTriggers(triggers, reportError, clearError) {
   update();
 }
 
-export function attachCalendarTrigger(trigger, reportError, clearError) {
-  attachPopupTriggers([{ trigger, type: 'calendar' }], reportError, clearError);
-}
-
 async function focusedBar() {
   const windows = await getAllWindows();
   for (const nativeWindow of windows) {

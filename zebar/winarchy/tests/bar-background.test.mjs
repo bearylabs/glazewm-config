@@ -8,12 +8,15 @@ test('bar stays above other window shadows and focused workspaces have no backgr
   assert.equal(pack.widgets.find(widget => widget.name === 'bar').zOrder, 'top_most');
   assert.equal(pack.widgets.find(widget => widget.name === 'bar').transparent, true);
   assert.equal(pack.widgets.find(widget => widget.name === 'popup').transparent, true);
-  const html = await readFile(new URL('../widgets/bar/index.html', import.meta.url), 'utf8');
-  assert.match(html, /--ctp-base: #1e1e2e;/);
-  assert.match(html, /background: var\(--ctp-base\);/);
-  assert.match(html, /updateBarZOrder\(glazewm\)/);
-  assert.doesNotMatch(html, /\.workspace\.is-focused\s*\{[^}]*background:/);
-  assert.match(html, /\.workspace\.is-focused::after,/);
+  const [css, script] = await Promise.all([
+    readFile(new URL('../widgets/bar/bar.css', import.meta.url), 'utf8'),
+    readFile(new URL('../widgets/bar/bar.mjs', import.meta.url), 'utf8'),
+  ]);
+  assert.match(css, /--ctp-base: #1e1e2e;/);
+  assert.match(css, /background: var\(--ctp-base\);/);
+  assert.match(script, /updateBarZOrder\(glazewm\)/);
+  assert.doesNotMatch(css, /\.workspace\.is-focused\s*\{[^}]*background:/);
+  assert.match(css, /\.workspace\.is-focused::after,/);
 });
 
 test('fullscreen can cover the bar and tiling restores its shadow-free layer', async () => {

@@ -14,7 +14,7 @@ test('Wi-Fi permission only allows the native network flyout; radio scripts are 
   for (const widget of pack.widgets) {
     assert(!widget.privileges.shellCommands.some(p => p.argsRegex.includes('GetRadiosAsync') && !p.argsRegex.includes('BluetoothMenu')));
   }
-  for (const path of ['../widgets/popup/system.mjs', '../widgets/shared/network-background.mjs']) {
+  for (const path of ['../widgets/popup/network.mjs', '../widgets/shared/network-background.mjs']) {
     const source = await readFile(new URL(path, import.meta.url), 'utf8');
     assert(!/executeWifiRadio|wifi-radio\.mjs|refreshRadio/.test(source));
   }
