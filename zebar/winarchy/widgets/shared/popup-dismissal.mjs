@@ -48,7 +48,7 @@ public static class PopupMouse {
       var target = GetAncestor(WindowFromPoint(point), 2);
       var title = new StringBuilder(256);
       GetWindowText(target, title, title.Capacity);
-      return title.ToString() != "Zebar - my-bar / bar";
+      return title.ToString() != "Zebar - winarchy / bar";
     } finally {
       SetThreadDpiAwarenessContext(previousDpi);
     }
@@ -76,7 +76,7 @@ public static class PopupMouse {
       if (code >= 0 && (id == 0x201 || id == 0x204 || id == 0x207 || id == 0x20B)) {
         lock (gate) {
           if (request != null) {
-            var popup = FindWindow(null, "Zebar - my-bar / popup");
+            var popup = FindWindow(null, "Zebar - winarchy / popup");
             if (popup != IntPtr.Zero) {
               var mouse = (Mouse)Marshal.PtrToStructure(data, typeof(Mouse));
               if (IsOutsideClick(popup, mouse.Position)) {

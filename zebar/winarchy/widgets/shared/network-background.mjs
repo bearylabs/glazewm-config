@@ -11,7 +11,7 @@ export const networkBackgroundPermissions = [
 ];
 
 export function readBackgroundSnapshot(key, validate, storage, now = Date.now()) {
-  const lease = readSnapshot('my-bar.network.poller.v1', value => value && typeof value.owner === 'string' && Number.isFinite(value.until), storage, now);
+  const lease = readSnapshot('winarchy.network.poller.v1', value => value && typeof value.owner === 'string' && Number.isFinite(value.until), storage, now);
   return lease && lease.until > now ? readSnapshot(key, validate, storage, now, 35000) : null;
 }
 
@@ -21,7 +21,7 @@ export function startNetworkBackground(exec, getNetwork, { storage, interval = 3
   let previous = null;
   let previousTime = 0;
   const owner = globalThis.crypto?.randomUUID?.() ?? `${now()}-${Math.random()}`;
-  const leaseKey = 'my-bar.network.poller.v1';
+  const leaseKey = 'winarchy.network.poller.v1';
   const validLease = value => value && typeof value.owner === 'string' && Number.isFinite(value.until);
   async function refresh() {
     if (busy || stopped) return;
@@ -32,7 +32,7 @@ export function startNetworkBackground(exec, getNetwork, { storage, interval = 3
     if (acquired && acquired.owner !== owner) return;
     busy = true;
     const net = getNetwork();
-    if (net) writeSnapshot('my-bar.network.connection.v1', {
+    if (net) writeSnapshot('winarchy.network.connection.v1', {
       defaultInterface: net.defaultInterface ?? null,
       interfaces: net.interfaces ?? [],
       defaultGateway: net.defaultGateway ?? null,
@@ -57,20 +57,20 @@ export function startNetworkBackground(exec, getNetwork, { storage, interval = 3
           ['IP Address', ipv4(iface) || '--'],
           ['Link rate', linkRate(iface) || '--'],
         ];
-        if (snapshot) writeSnapshot('my-bar.network.traffic.v1', { snapshot, time, entries }, storage, time);
-        else clearSnapshot('my-bar.network.traffic.v1', storage);
+        if (snapshot) writeSnapshot('winarchy.network.traffic.v1', { snapshot, time, entries }, storage, time);
+        else clearSnapshot('winarchy.network.traffic.v1', storage);
         previous = snapshot; previousTime = time;
       })(),
       executeGlobalProtect(exec, 'status').then(vpn => {
         if (!stopped) {
-          writeSnapshot('my-bar.network.vpn.v1', vpn, storage, now());
+          writeSnapshot('winarchy.network.vpn.v1', vpn, storage, now());
           onVpn(vpn);
         }
       }),
     ];
     try {
       const results = await Promise.allSettled(queries);
-      const keys = ['my-bar.network.traffic.v1', 'my-bar.network.vpn.v1'];
+      const keys = ['winarchy.network.traffic.v1', 'winarchy.network.vpn.v1'];
       results.forEach((result, index) => {
         if (!stopped && result.status === 'rejected') {
           clearSnapshot(keys[index], storage);

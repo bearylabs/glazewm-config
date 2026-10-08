@@ -53,7 +53,7 @@ public static class PopupHitTest {
         Check(right, top, true);
         Check(left, bottom, true);
         Check(left, top - 1, true);
-        PopupMouse.TargetTitle = "Zebar - my-bar / bar";
+        PopupMouse.TargetTitle = "Zebar - winarchy / bar";
         Check(right + 100, top, false);
         PopupMouse.TargetTitle = "Other application";
       }

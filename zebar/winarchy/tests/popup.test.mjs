@@ -46,11 +46,11 @@ test('popup owns narrowly scoped power privileges without changing bar docking',
   assert.deepEqual(popup.privileges.shellCommands[5], {
     program: 'powershell.exe', argsRegex: globalProtectArgsRegex(),
   });
-  assert.equal(popup.privileges.shellCommands.length, 8);
+  assert.equal(popup.privileges.shellCommands.length, 9);
   assert.equal(bar.presets[0].height, '28px');
   assert.equal(bar.presets[0].dockToEdge.enabled, true);
   assert.deepEqual(bar.presets[0].monitorSelection, { type: 'all' });
-  assert.equal(bar.privileges.shellCommands.length, 4);
+  assert.equal(bar.privileges.shellCommands.length, 5);
   const powerStatus = bar.privileges.shellCommands[0];
   assert.equal(powerStatus.program, 'powershell.exe');
   const allowed = new RegExp(powerStatus.argsRegex);
@@ -217,7 +217,7 @@ async function harness({ startError = null, warmError = null, holdWarm = false, 
     const mocks = {
       'https://esm.sh/zebar@3.3.1': {
         currentWidget: () => ({
-          id, packId: 'my-bar',
+          id, packId: 'winarchy',
           tauriWindow: { innerPosition: async () => ({ x: 0, y: 0 }) },
         }),
         shellSpawn: async (program, args) => {
@@ -238,7 +238,7 @@ async function harness({ startError = null, warmError = null, holdWarm = false, 
           };
         },
         startWidget: async (_, placement) => {
-          const pendingRequest = JSON.parse(storage.getItem('my-bar:popup:my-bar'));
+          const pendingRequest = JSON.parse(storage.getItem('winarchy:popup:winarchy'));
           if (pendingRequest.phase === 'warming') {
             assert(!commands.some(command => command.startsWith('arm:')), 'Background startup must not arm outside-click detection.');
             assert.equal(placement.width, '1px');
@@ -258,7 +258,7 @@ async function harness({ startError = null, warmError = null, holdWarm = false, 
           const label = `popup-${startCount}`;
           const nativeWindow = {
             label, visible: pendingRequest.phase !== 'warming',
-            title: async () => 'Zebar - my-bar / popup',
+            title: async () => 'Zebar - winarchy / popup',
             hide: async () => { nativeWindow.visible = false; },
             show: async () => { nativeWindow.visible = true; },
             close: async () => {
@@ -266,8 +266,8 @@ async function harness({ startError = null, warmError = null, holdWarm = false, 
             },
           };
           nativeWindows.push(nativeWindow);
-          storage.setItem('my-bar:popup:my-bar:window', label);
-          const request = JSON.parse(storage.getItem('my-bar:popup:my-bar'));
+          storage.setItem('winarchy:popup:winarchy:window', label);
+          const request = JSON.parse(storage.getItem('winarchy:popup:winarchy'));
           const ready = () => {
             for (const callback of listeners.values()) callback({ payload: { ...request, popupId: label } });
           };
@@ -286,7 +286,7 @@ async function harness({ startError = null, warmError = null, holdWarm = false, 
           return () => listeners.delete(id);
         },
         emit: async (event, payload) => {
-          assert.equal(event, 'my-bar:popup-open');
+          assert.equal(event, 'winarchy:popup-open');
           if (reopenError) throw reopenError;
           const nativeWindow = nativeWindows.find(item => item.label === payload.popupId);
           assert(nativeWindow);
@@ -349,7 +349,7 @@ async function harness({ startError = null, warmError = null, holdWarm = false, 
       hover(type) { findTrigger(type).dispatchEvent(new Event('pointermove')); },
       leave(type) { findTrigger(type).dispatchEvent(new Event('pointerleave')); },
       blur() { window.dispatchEvent(new Event('blur')); },
-      outsideClick(requestId = JSON.parse(storage.getItem('my-bar:popup:my-bar')).requestId) {
+      outsideClick(requestId = JSON.parse(storage.getItem('winarchy:popup:winarchy')).requestId) {
         mouseOutput(`outside:${requestId}`);
       },
       pagehide() { window.dispatchEvent(new Event('pagehide')); },
@@ -364,13 +364,13 @@ async function harness({ startError = null, warmError = null, holdWarm = false, 
   return {
     bar, errors, placements,
     finishWarmup: () => finishWarmup(),
-    seedState: state => storage.setItem('my-bar:popup:my-bar', JSON.stringify(state)),
+    seedState: state => storage.setItem('winarchy:popup:winarchy', JSON.stringify(state)),
     get nativeWindows() { return nativeWindows.filter(item => item.visible); },
     get allWindows() { return nativeWindows; },
     async destroyCachedWindow() { await nativeWindows[0].close(); },
     get startCount() { return startCount; },
     get helperStartCount() { return helperStartCount; },
-    state: () => JSON.parse(storage.getItem('my-bar:popup:my-bar')),
+    state: () => JSON.parse(storage.getItem('winarchy:popup:winarchy')),
     async settle() {
       await new Promise(resolve => setImmediate(resolve));
       await queue;
@@ -405,7 +405,7 @@ test('bar startup preloads exactly one hidden popup across monitors before the f
 
 test('startup recovers persisted active state from a previous Zebar process', async () => {
   const env = await harness();
-  env.seedState({ phase: 'open', type: 'calendar', packId: 'my-bar', ownerId: 'old-bar', requestId: 'old-request' });
+  env.seedState({ phase: 'open', type: 'calendar', packId: 'winarchy', ownerId: 'old-bar', requestId: 'old-request' });
   const bar = await env.bar('bar-1');
   await env.settle();
   assert.equal(env.state(), null);
@@ -563,7 +563,7 @@ test('trigger hover clears on activation and focus loss without a pointerleave',
 
 async function popupHarness(initiallyFocused = false, type = 'calendar', layoutOverrides = {}, initialPhase = 'opening') {
   const request = {
-    requestId: 'request-1', ownerId: 'bar-1', packId: 'my-bar',
+    requestId: 'request-1', ownerId: 'bar-1', packId: 'winarchy',
     type, phase: initialPhase,
     layout: {
       monitor: monitor(-2560, -200, 2560, 1440, 1.5),
@@ -602,7 +602,7 @@ async function popupHarness(initiallyFocused = false, type = 'calendar', layoutO
   const positions = [];
   const nativeWindow = {
     label: 'popup-1',
-    title: async () => 'Zebar - my-bar / popup',
+    title: async () => 'Zebar - winarchy / popup',
     isFocused: async () => focused,
     show: async () => { visible = true; lifecycle.push('show'); },
     hide: async () => {
@@ -641,7 +641,7 @@ async function popupHarness(initiallyFocused = false, type = 'calendar', layoutO
   });
   const controller = await loadController(context, {
     'https://esm.sh/zebar@3.3.1': {
-      currentWidget: () => ({ id: 'popup-1', packId: 'my-bar', tauriWindow: nativeWindow }),
+      currentWidget: () => ({ id: 'popup-1', packId: 'winarchy', tauriWindow: nativeWindow }),
       shellSpawn: async () => { throw new Error('Popups must reuse the bar helper, never spawn PowerShell.'); },
     },
     'https://esm.sh/@tauri-apps/api@2.0.2/window': {
@@ -651,7 +651,7 @@ async function popupHarness(initiallyFocused = false, type = 'calendar', layoutO
     },
     'https://esm.sh/@tauri-apps/api@2.0.2/event': {
       listen: async (event, callback) => {
-        assert.equal(event, 'my-bar:popup-open');
+        assert.equal(event, 'winarchy:popup-open');
         openHandler = callback;
         return () => { openHandler = null; };
       },

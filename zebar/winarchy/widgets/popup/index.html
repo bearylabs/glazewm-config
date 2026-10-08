@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>System popup</title>
+    <title>Winarchy popup</title>
     <style>
       :root {
         color-scheme: dark;
@@ -197,8 +197,6 @@
       #power-confirmation { position: sticky; z-index: 3; bottom: 3px; padding: 11px; margin-top: 10px; border: 1px solid var(--red); border-radius: 8px; background: var(--mantle); box-shadow: 0 8px 24px #0008; }
       #power-confirmation p { margin-top: 0; }
       #power-confirmation button { margin-right: 7px; }
-      .panel .display-refresh { flex: 0 0 auto; padding: 6px 8px; font-size: 10px; border: 1px solid color-mix(in srgb, var(--text) 40%, transparent); border-radius: 0; background: color-mix(in srgb, var(--text) 4%, transparent); }
-      .panel .display-refresh:hover, .panel .display-refresh:focus-visible { border-color: color-mix(in srgb, var(--text) 25%, transparent); background: color-mix(in srgb, var(--text) 8%, transparent); outline: none; }
       .display-section { margin-top: 14px; padding-top: 14px; border-top: 1px solid color-mix(in srgb, var(--text) 18%, transparent); }
       .display-section__heading { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 10px; }
       .panel .display-section h2 { margin: 0; color: var(--panel-caption); font-size: 10px; font-weight: 700; letter-spacing: 1px; }
@@ -213,11 +211,6 @@
       .display-row h3 { flex: 1; min-width: 0; margin: 0; font-size: 12px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .display-row--current h3 { font-weight: 700; }
       .display-row__state { flex: 0 0 auto; font-size: 10px; }
-      .display-details { display: grid; gap: 4px; padding: 6px 6px 0 36px; }
-      .display-details > div { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 8px; align-items: baseline; }
-      .panel .display-details dt { color: var(--panel-caption); font-size: 11px; }
-      .panel .display-details dd { min-width: 0; margin: 0; font-size: 12px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
-      .panel .display-note { margin: 14px 0 0; padding-top: 14px; border-top: 1px solid color-mix(in srgb, var(--text) 18%, transparent); color: var(--panel-caption); }
       .power-hero .hero__value { font-size: 28px; font-weight: 700; }
       .power-stats > .battery-progress { height: 8px; margin: 14px 0; }
       html[data-popup-type='power'] .meter { height: 4px; background: color-mix(in srgb, var(--text) 12%, transparent); }
@@ -231,7 +224,7 @@
       .power-details > div { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 14px; align-items: baseline; }
       .panel .power-details dt { color: var(--panel-caption); font-size: 11px; }
       .panel .power-details dd { min-width: 0; margin: 0; font-size: 11px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
-      .battery-details { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+      .battery-details { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 20px; }
       .battery-details > div { grid-template-columns: auto minmax(0, 1fr); gap: 8px; }
       .battery-details dd { text-align: right; }
       .power-drive { margin-top: 10px; }
@@ -274,11 +267,14 @@
       .network-section__state { color: var(--panel-caption); font-size: 10px; white-space: nowrap; }
       .network-vpn__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 10px; }
       .network-vpn__labels { display: grid; gap: 2px; min-width: 0; }
-      #globalprotect-name { font-size: 12px; }
       html[data-popup-type='globalprotect'] .network-vpn { margin: 0; padding: 0; border: 0; }
-      html[data-popup-type='globalprotect'] .network-section__heading { justify-content: flex-start; gap: 14px; margin-bottom: 14px; }
-      html[data-popup-type='globalprotect'] .network-section__heading > svg { width: 24px; height: 24px; }
-      #globalprotect-open { margin-left: auto; flex: 0 0 auto; }
+      html[data-popup-type='globalprotect'] .network-section__heading { justify-content: flex-start; gap: 14px; min-height: 34px; margin-bottom: 0; }
+      html[data-popup-type='globalprotect'] .network-section__heading > svg { flex: 0 0 24px; width: 24px; height: 24px; }
+      html[data-popup-type='globalprotect'] .network-vpn__labels { flex: 1; }
+      html[data-popup-type='globalprotect'] .network-section__state { font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; }
+      html[data-popup-type='globalprotect'] .network-vpn__actions { gap: 2px; }
+      html[data-popup-type='globalprotect'] .network-vpn[data-connected='false'] .network-section__heading > svg { opacity: 0.5; }
+      #globalprotect-open { flex: 0 0 auto; }
       .panel #globalprotect-title { color: var(--text); font-size: 14px; letter-spacing: normal; }
       .network-vpn__actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
       .network-vpn__actions button, .panel .network-vpn__open { border: 1px solid transparent; border-radius: 0; background: transparent; }
@@ -350,12 +346,19 @@
       .bluetooth-hero .hero__meta { color: var(--panel-caption); font-size: 10px; letter-spacing: 1.2px; }
       .bluetooth-section { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--audio-selected); }
       .panel .bluetooth-section h2 { margin: 0 0 10px; color: var(--panel-caption); }
-      .bluetooth-row { display: flex; gap: 6px; margin-bottom: 6px; }
-      .bluetooth-row .audio-device { flex: 1; min-width: 0; }
-      .bluetooth-name, .bluetooth-state { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .bluetooth-state { color: var(--panel-caption); font-size: 10px; margin-top: 3px; font-weight: 400; }
-      .panel :is(.bluetooth-scan, .bluetooth-forget, .bluetooth-settings) { border: 1px solid var(--audio-outline); border-radius: 0; background: transparent; }
-      .panel :is(.bluetooth-scan, .bluetooth-forget, .bluetooth-settings):hover { background: var(--audio-hover); }
+      .bluetooth-row { position: relative; display: flex; margin-bottom: 6px; }
+      .bluetooth-row .audio-device { flex: 1; min-width: 0; padding-right: 34px; }
+      .panel .bluetooth-row:hover .audio-device, .panel .bluetooth-row:focus-within .audio-device { background: var(--audio-hover); border-color: var(--audio-outline); }
+      .bluetooth-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .bluetooth-state { display: block; margin-top: 3px; color: var(--panel-caption); font-size: 10px; font-weight: 400; white-space: normal; overflow-wrap: anywhere; }
+      .bluetooth-state[hidden] { display: none; }
+      .bluetooth-state.error { color: var(--red); }
+      .panel .bluetooth-forget { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid transparent; border-radius: 0; background: transparent; opacity: 0; pointer-events: none; }
+      .panel .bluetooth-forget[hidden] { display: none; }
+      .bluetooth-forget svg { display: block; width: 16px; height: 16px; }
+      .bluetooth-row:hover .bluetooth-forget, .bluetooth-row:focus-within .bluetooth-forget { opacity: 1; pointer-events: auto; }
+      .panel .bluetooth-forget:hover { color: var(--accent); background: var(--audio-hover); }
+      .panel .bluetooth-forget:focus-visible { border-color: var(--audio-outline); outline: none; }
       @media (prefers-reduced-motion: reduce) {
         .audio-switch__knob, .audio-slider-row input::-webkit-slider-thumb { transition: none; }
         .battery-progress[data-charging='true'] > span { animation: none; }

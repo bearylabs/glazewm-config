@@ -28,15 +28,15 @@ test('background poller updates traffic and VPN without any open popup or radio 
   assert.equal(calls.length, 2);
   time += 30000; tick(); await settle();
   assert.equal(calls.length, 4);
-  const traffic = readSnapshot('my-bar.network.traffic.v1', trafficSnapshotValid, storage, time);
+  const traffic = readSnapshot('winarchy.network.traffic.v1', trafficSnapshotValid, storage, time);
   assert.equal(Object.fromEntries(traffic.entries).Receiving, '1.0 KB/s');
   assert.equal(Object.fromEntries(traffic.entries)['IP Address'], '10.0.0.2');
-  assert.equal(storage.getItem('my-bar.network.radio.v1'), null);
-  assert.deepEqual(readBackgroundSnapshot('my-bar.network.vpn.v1', vpnSnapshotValid, storage, time), { available: true, connected: false });
-  assert.equal(readBackgroundSnapshot('my-bar.network.vpn.v1', vpnSnapshotValid, storage, time + 35001), null);
-  assert.deepEqual(readSnapshot('my-bar.network.vpn.v1', vpnSnapshotValid, storage, time), { available: true, connected: false });
+  assert.equal(storage.getItem('winarchy.network.radio.v1'), null);
+  assert.deepEqual(readBackgroundSnapshot('winarchy.network.vpn.v1', vpnSnapshotValid, storage, time), { available: true, connected: false });
+  assert.equal(readBackgroundSnapshot('winarchy.network.vpn.v1', vpnSnapshotValid, storage, time + 35001), null);
+  assert.deepEqual(readSnapshot('winarchy.network.vpn.v1', vpnSnapshotValid, storage, time), { available: true, connected: false });
   stop(); tick(); await settle(); assert(canceled); assert.equal(calls.length, 4);
-  assert.equal(readBackgroundSnapshot('my-bar.network.vpn.v1', vpnSnapshotValid, storage, time), null);
+  assert.equal(readBackgroundSnapshot('winarchy.network.vpn.v1', vpnSnapshotValid, storage, time), null);
 });
 test('multiple monitor bars elect one poller and a remaining bar can take over', async () => {
   const storage = store(); const { exec, calls } = execFixture(); let tick2;
@@ -48,7 +48,7 @@ test('multiple monitor bars elect one poller and a remaining bar can take over',
 });
 test('background permissions allow only exact read queries, never radio or VPN actions', async () => {
   const pack = JSON.parse(await readFile(new URL('../zpack.json', import.meta.url)));
-  assert.deepEqual(pack.widgets.find(w => w.name === 'bar').privileges.shellCommands.slice(2), networkBackgroundPermissions);
+  assert.deepEqual(pack.widgets.find(w => w.name === 'bar').privileges.shellCommands.slice(2, 4), networkBackgroundPermissions);
   assert.equal(networkBackgroundPermissions.length, 2);
   const vpn = new RegExp(networkBackgroundPermissions[1].argsRegex);
   assert(vpn.test(globalProtectArgs('status').join(' ')));

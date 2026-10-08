@@ -43,7 +43,7 @@ test('hide never opens or clicks the client and targets only its verified main p
 
 test('connect and disconnect place only the verified main window beside the visible Zebar popup', () => {
   const command = globalProtectArgs('connect')[3];
-  assert.match(command, /FindWindow\(null, "Zebar - my-bar \/ popup"\)/);
+  assert.match(command, /FindWindow\(null, "Zebar - winarchy \/ popup"\)/);
   assert.match(command, /!IsWindowVisible\(popup\)/);
   assert.match(command, /process\.ProcessName, "zebar"/);
   assert.match(command, /SetThreadDpiAwarenessContext\(new IntPtr\(-4\)\)/);

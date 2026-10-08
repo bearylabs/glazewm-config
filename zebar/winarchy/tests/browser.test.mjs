@@ -13,6 +13,7 @@ const edge = process.env.EDGE_PATH ?? 'C:\\Program Files (x86)\\Microsoft\\Edge\
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 const mocks = `
+  import { createAudioOwner } from '/widgets/shared/audio-bridge.mjs';
   const listeners = [];
   const data = {
     date: { now: '2026-10-07T10:58:00', formatted: '10:58' },
@@ -46,8 +47,19 @@ const mocks = `
   ];
   const calls = [];
   const errors = {};
-  const notify = () => listeners.forEach(fn => fn());
-  window.__test = { data, calls, errors, notify, failAudio: false };
+  const notify = () => {
+    listeners.forEach(fn => fn());
+    if (document.documentElement.dataset.popupType === 'audio') {
+      return new Promise(resolve => setTimeout(resolve, 10));
+    }
+  };
+  window.__test = { data, calls, errors, notify, failAudio: false, providerStops: 0 };
+  // Model the persistent bar transport even when testing only the popup page.
+  if (location.pathname.includes('/popup/')) {
+    const owner = createAudioOwner(() => ({ audio: data.audio, error: errors.audio }));
+    listeners.push(() => owner.publish());
+    window.addEventListener('pagehide', () => owner.close(), { once: true });
+  }
   data.audio.setVolume = async (volume, options) => {
     if (window.__test.failAudio) throw new Error('Volume command failed');
     calls.push(['volume', volume, options]);
@@ -63,6 +75,7 @@ const mocks = `
     return { setZOrder: async order => calls.push(['z-order', order]) };
   }
   export function createProviderGroup(config) {
+    if (location.pathname.includes('/popup/') && config.audio) throw new Error('Popup must not own native audio');
     const owned = [];
     window.__test.providerStops ??= 0;
     const register = fn => { owned.push(fn); listeners.push(fn); };
@@ -128,6 +141,9 @@ const mocks = `
         ],
       }) };
     }
+    if (program === 'powershell.exe' && args[3]?.includes('BatteryFullChargedCapacity')) return {
+      code: 0, stdout: '38000', stderr: '',
+    };
     if (program === 'powershell.exe') return {
       code: 0, stdout: JSON.stringify(window.__test.powerStatus ?? { ac: 'Online', charge: 0.8, battery: 'High' }),
     };
@@ -236,7 +252,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
         source = source.replace('const interval = setInterval', 'window.__refreshGlobalProtect = refresh; const interval = setInterval');
       }
       if (url.pathname === '/widgets/popup/bluetooth.mjs') {
-        source = source.replace('const statusTimer = setInterval', 'window.__refreshBluetoothStatus = () => run("status"); const statusTimer = setInterval');
+        source = source.replace('const statusTimer = setInterval', 'window.__refreshBluetoothStatus = () => run("status"); window.__scanBluetooth = () => run("scan"); const statusTimer = setInterval');
       }
       source = source.replaceAll('https://esm.sh/zebar@3.3.1', '/__mocks.mjs')
         .replaceAll('https://esm.sh/@tauri-apps/api@2.0.2/window', '/__mocks.mjs');
@@ -286,6 +302,14 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
         await pause(25);
       }
       assert(ready, `${type} must initialize without module errors`);
+      if (type === 'audio') {
+        for (let attempt = 0; attempt < 100; attempt++) {
+          if (await evaluate("!document.getElementById('volume-slider').disabled")) break;
+          await pause(10);
+        }
+        assert(await evaluate("!document.getElementById('volume-slider').disabled"), 'Audio receives the bar snapshot');
+        await evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+      }
     }
     const click = text => evaluate(`[...document.querySelectorAll('#system-content button')].find(node => node.textContent === ${JSON.stringify(text)}).click()`);
     await t.test('bar keeps exact clock center and existing workspace behavior', async () => {
@@ -320,14 +344,32 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
         { available: true, connected: false },
         { available: true, connected: true },
       ]) {
-        await evaluate(`localStorage.setItem('my-bar.network.vpn.v1', JSON.stringify({ time: Date.now(), value: ${JSON.stringify(vpn)} }));
-          window.dispatchEvent(new StorageEvent('storage', { key: 'my-bar.network.vpn.v1' }));`);
+        await evaluate(`localStorage.setItem('winarchy.network.vpn.v1', JSON.stringify({ time: Date.now(), value: ${JSON.stringify(vpn)} }));
+          window.dispatchEvent(new StorageEvent('storage', { key: 'winarchy.network.vpn.v1' }));`);
         assert.equal(await evaluate("document.getElementById('globalprotect-trigger').hidden"), !vpn.available);
         assert.equal(await evaluate("document.getElementById('globalprotect-trigger').classList.contains('is-muted')"), !vpn.connected);
         assert.equal(await evaluate("getComputedStyle(document.querySelector('#globalprotect-trigger .vpn__slash')).display !== 'none'"), !vpn.connected);
         if (vpn.available) assert.notEqual(await evaluate("getComputedStyle(document.getElementById('globalprotect-trigger')).display"), 'none');
       }
       assert.equal(await evaluate("getComputedStyle(document.getElementById('globalprotect-trigger')).color === getComputedStyle(document.getElementById('display-trigger')).color"), true);
+    });
+    await t.test('focused workspace uses the same underline as open popups', async () => {
+      await load('bar');
+      const results = await evaluate(`(() => {
+        const trigger = document.getElementById('display-trigger');
+        trigger.setAttribute('aria-expanded', 'true');
+        const properties = ['content', 'bottom', 'width', 'height', 'backgroundColor', 'transform', 'pointerEvents'];
+        const style = node => properties.map(key => getComputedStyle(node, '::after')[key]);
+        return ['ws-v1', 'ws-v2', 'ws-v3'].map(variant => {
+          document.body.className = variant;
+          return { workspace: style(document.querySelector('.workspace.is-focused')),
+            popup: style(trigger), inactive: getComputedStyle(document.querySelector('.workspace:not(.is-focused)'), '::after').content };
+        });
+      })()`);
+      for (const result of results) {
+        assert.deepEqual(result.workspace, result.popup);
+        assert.equal(result.inactive, 'none');
+      }
     });
     await t.test('center and right triggers only underline while their popup is open', async () => {
       await load('bar');
@@ -471,7 +513,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert(compactHeight < fullHeight, 'Missing network details must not leave a large empty panel.');
       await load('display');
       await evaluate('window.__test.monitors = [{ name: "Main", position: { x: 0, y: 0 }, size: { width: 1920, height: 1080 }, scaleFactor: 1 }]');
-      await click('Refresh displays');
+      await evaluate("window.__reopenPopup('display')");
       await pause(100);
       assert(await evaluate('window.__popupHeights.at(-1) < innerHeight'), 'A single display should not fill the maximum height.');
     });
@@ -480,10 +522,16 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       await pause(100);
       assert.deepEqual(await evaluate("[...document.querySelectorAll('.bluetooth-section h2')].map(el => el.textContent)"), ['Connected', 'Paired', 'Available']);
       assert.equal(await evaluate("document.querySelector('.audio-switch').getAttribute('aria-checked')"), 'true');
+      assert.equal(await evaluate("document.querySelector('.bluetooth-scan')"), null);
+      assert.equal(await evaluate("document.querySelector('.bluetooth-hero #bluetooth-settings').getAttribute('aria-label')"), 'Open Windows Bluetooth settings');
+      assert.equal(await evaluate("document.querySelector('#bluetooth-settings').className"), 'network-vpn__open');
+      assert.equal(await evaluate("document.querySelector('#bluetooth-settings path').getAttribute('d')"), 'M6 18 18 6M6 6h12v12');
+      assert.equal(await evaluate("/Scanning for nearby|Put new devices|Bluetooth LE connections/.test(document.querySelector('#system-content').textContent)"), false);
+      assert(await evaluate("window.__test.calls.some(call => call[0] === 'bluetooth' && call[2][3].includes('::Read($true)'))"), 'Discovery starts automatically.');
       await evaluate("document.querySelector('[data-action=pair]').click()");
       await pause(100);
       assert(await evaluate("window.__test.calls.some(call => call[0] === 'bluetooth' && call[2][3].includes(\"::Act('pair'\"))"));
-      await evaluate("window.__test.failBluetooth = true; document.querySelector('.bluetooth-scan').click()");
+      await evaluate("window.__test.failBluetooth = true; void window.__refreshBluetoothStatus()");
       await pause(100);
       assert(await evaluate("document.querySelector('#bluetooth-status').textContent.includes('Bluetooth access denied')"));
       assert.equal(await evaluate("document.querySelector('#bluetooth-status').getAttribute('role')"), 'alert');
@@ -498,7 +546,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       await evaluate(`(() => {
         window.__pairedBefore = document.querySelector('[data-device-id="paired"][data-action="connect"]');
         window.__test.holdBluetoothScan = true;
-        document.querySelector('.bluetooth-scan').click();
+        void window.__scanBluetooth();
       })()`);
       await pause(50);
       assert.equal(await evaluate('window.__pairedBefore.disabled'), false);
@@ -522,6 +570,22 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert.equal(await evaluate('window.__pairedBefore.dataset.action'), 'disconnect');
       assert.equal(await evaluate("document.querySelector('[data-device-id=stale]') === null"), true);
       assert.equal(await evaluate('window.__pairedBefore.disabled'), false);
+    });
+    await t.test('Bluetooth discovery silently shows new devices only when found', async () => {
+      await load('bluetooth');
+      await pause(100);
+      await evaluate(`window.__test.bluetooth = { available: true, enabled: true, devices: [] }; window.__scanBluetooth()`);
+      assert.equal(await evaluate("document.querySelectorAll('.bluetooth-section:not([hidden])').length"), 0);
+      await evaluate('window.__test.holdBluetoothScan = true; void window.__scanBluetooth()');
+      await pause(50);
+      assert.equal(await evaluate("document.querySelectorAll('.bluetooth-section:not([hidden])').length"), 0);
+      assert.equal(await evaluate("document.querySelector('#bluetooth-status').textContent"), '');
+      await evaluate(`window.__test.resolveBluetoothScan({ available: true, enabled: true, devices: [
+        { id: 'new', name: 'New mouse', paired: false, connected: false },
+      ] })`);
+      await pause(100);
+      assert.equal(await evaluate("document.querySelector('.bluetooth-section:not([hidden]) h2').textContent"), 'Available');
+      assert.equal(await evaluate("document.querySelector('[data-device-id=new] .bluetooth-name').textContent"), 'New mouse');
     });
     await t.test('Bluetooth status refresh updates paired rows without disabling them or replacing nearby devices', async () => {
       await load('bluetooth');
@@ -592,7 +656,8 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       await load('audio');
       const stopsBefore = await evaluate('window.__test.providerStops');
       await evaluate("window.__reopenPopup('calendar')");
-      assert.equal(await evaluate('window.__test.providerStops'), stopsBefore + 1);
+      assert.equal(await evaluate('window.__test.providerStops'), stopsBefore,
+        'Closing audio must not stop the persistent native provider.');
       const month = await evaluate("document.getElementById('month-label').textContent");
       await evaluate("document.getElementById('next-month').click()");
       const nextMonth = await evaluate("document.getElementById('month-label').textContent");
@@ -607,13 +672,15 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       await evaluate("window.__reopenPopup('globalprotect')");
       assert.equal(await evaluate("document.querySelectorAll('#globalprotect-toggle').length"), 1);
       await evaluate("window.__reopenPopup('audio')");
+      await pause(25);
       assert.equal(await evaluate("document.querySelectorAll('#volume-slider').length"), 1);
       assert.equal(await evaluate("document.querySelectorAll('#globalprotect-toggle').length"), 0);
-      assert.equal(await evaluate('window.__test.providerStops'), stopsBefore + 2);
+      assert.equal(await evaluate('window.__test.providerStops'), stopsBefore + 1);
       await evaluate("window.__test.data.audio.defaultPlaybackDevice.volume = 71; window.__test.notify()");
       assert.equal(await evaluate("document.getElementById('volume-slider').value"), '71');
       await evaluate("window.__reopenPopup('audio')");
-      assert.equal(await evaluate('window.__test.providerStops'), stopsBefore + 3);
+      assert.equal(await evaluate('window.__test.providerStops'), stopsBefore + 1,
+        'Reopening audio must only replace transport listeners.');
       assert.equal(await evaluate("document.querySelectorAll('#volume-slider').length"), 1);
       const vpnCalls = await evaluate("window.__test.calls.filter(call => call[0] === 'globalprotect').length");
       await pause(1100);
@@ -829,7 +896,9 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       await load('globalprotect');
       await evaluate('window.__refreshGlobalProtect()');
       assert(await evaluate("document.querySelector('.network-section__heading #globalprotect-open') !== null"));
-      assert.equal(await evaluate("document.querySelector('.network-vpn__actions #globalprotect-open')"), null);
+      assert(await evaluate("document.querySelector('.network-vpn__actions #globalprotect-open') !== null"));
+      assert.equal(await evaluate("document.querySelectorAll('.network-vpn__row, #globalprotect-name').length"), 0);
+      assert.equal(await evaluate("document.querySelector('.network-vpn__actions').firstElementChild.id"), 'globalprotect-open');
       const geometry = await evaluate(`(() => {
         const open = document.getElementById('globalprotect-open');
         const toggle = document.getElementById('globalprotect-toggle');
@@ -840,9 +909,12 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
         return { iconDx: (openRect.left + openRect.width / 2) - (icon.left + icon.width / 2),
           iconDy: (openRect.top + openRect.height / 2) - (icon.top + icon.height / 2), openPadding: getComputedStyle(open).padding, switchPadding: getComputedStyle(toggle).padding,
           dx: (button.left + button.width / 2) - (track.left + track.width / 2),
-          dy: (button.top + button.height / 2) - (track.top + track.height / 2) };
+          dy: (button.top + button.height / 2) - (track.top + track.height / 2),
+          actionsDy: (button.top + button.height / 2) - (openRect.top + openRect.height / 2),
+          arrowBeforeSwitch: openRect.right <= button.left }; 
       })()`);
       assert.equal(geometry.openPadding, '0px');
+      assert(geometry.arrowBeforeSwitch && Math.abs(geometry.actionsDy) < 0.1, JSON.stringify(geometry));
       assert(Math.abs(geometry.iconDx) < 0.1 && Math.abs(geometry.iconDy) < 0.1, JSON.stringify(geometry));
       assert.equal(geometry.switchPadding, '6px');
       assert(Math.abs(geometry.dx) < 0.1 && Math.abs(geometry.dy) < 0.1, JSON.stringify(geometry));
@@ -979,43 +1051,33 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       await evaluate(`window.__test.data.network = null; window.__test.errors.network = 'Access denied'; window.__test.notify()`);
       assert.match(await evaluate("document.getElementById('system-content').textContent"), /Access denied/);
     });
-    await t.test('display uses Omarchy hero, scale section and flat current-monitor rows', async () => {
+    await t.test('display matches the flat Omarchy popups without links or controls', async () => {
       await load('display');
       const result = await evaluate(`(() => {
         const panel = document.getElementById('system-content');
         return {
-          headerHidden: document.querySelector('header').hidden,
           title: document.getElementById('display-title').textContent,
           meta: panel.querySelector('.hero__meta').textContent,
-          labelledBy: document.querySelector('main').getAttribute('aria-labelledby'),
           font: getComputedStyle(document.body).fontFamily,
-          padding: getComputedStyle(panel).padding,
           radius: getComputedStyle(document.body).borderRadius,
           sections: [...panel.querySelectorAll('h2')].map(node => node.textContent),
           scale: panel.querySelector('.display-scale__value').textContent,
           current: panel.querySelector('.display-row--current h3').textContent,
-          selectedFill: getComputedStyle(panel.querySelector('.display-row--current .display-row__heading')).backgroundColor,
-          flat: panel.querySelectorAll('.card, .badge, .display-preview, .details-grid').length === 0,
-          buttons: [...panel.querySelectorAll('button')].map(node => node.id),
-          inputs: panel.querySelectorAll('input').length,
-          busy: document.getElementById('display-refresh').disabled,
+          fill: getComputedStyle(panel.querySelector('.display-row--current .display-row__heading')).backgroundColor,
+          controls: panel.querySelectorAll('button, input, a, .card, .badge, dl').length,
+          connected: panel.querySelectorAll('[aria-label="Connected"]').length,
         };
       })()`);
-      assert.equal(result.headerHidden, true);
       assert.equal(result.title, 'Display');
-      assert.equal(result.meta, 'READ-ONLY OVERVIEW');
-      assert.equal(result.labelledBy, 'display-title');
+      assert.equal(result.meta, 'Left');
       assert.match(result.font, /JetBrainsMono/);
-      assert.equal(result.padding, '14px');
       assert.equal(result.radius, '0px');
       assert.deepEqual(result.sections, ['Scale', 'Displays']);
       assert.equal(result.scale, '150%');
-      assert.equal(result.current, 'Left');
-      assert.notEqual(result.selectedFill, 'rgba(0, 0, 0, 0)');
-      assert.equal(result.flat, true);
-      assert.deepEqual(result.buttons, ['display-refresh']);
-      assert.equal(result.inputs, 0);
-      assert.equal(result.busy, false);
+      assert.equal(result.current, 'Left · focused');
+      assert.notEqual(result.fill, 'rgba(0, 0, 0, 0)');
+      assert.equal(result.controls, 0);
+      assert.equal(result.connected, 2);
       if (process.env.DISPLAY_SCREENSHOT_PATH) {
         const height = await evaluate('window.__popupHeights.at(-1)');
         const { data } = await client.call('Page.captureScreenshot', {
@@ -1023,39 +1085,24 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
         });
         await writeFile(process.env.DISPLAY_SCREENSHOT_PATH, Buffer.from(data, 'base64'));
       }
-      await evaluate(`window.__test.monitors = [];`);
-      await click('Refresh displays');
-      assert.equal(await evaluate("document.getElementById('display-title').textContent"), 'Display');
+      await evaluate('window.__test.monitors = []; window.__reopenPopup("display")');
       assert.match(await evaluate("document.getElementById('popup-error').textContent"), /No connected displays/);
-      assert.equal(await evaluate("document.getElementById('display-refresh').disabled"), false);
       await evaluate(`window.__test.monitors = [{ name: null, position: { x: -100, y: -200 },
-        size: { width: 1080, height: 1920 }, scaleFactor: 1.25 }];`);
-      await click('Refresh displays');
+        size: { width: 1080, height: 1920 }, scaleFactor: 1.25 }]; window.__reopenPopup('display');`);
       assert.equal(await evaluate("document.querySelector('.display-scale__value').textContent"), '125%');
-      assert.equal(await evaluate("document.querySelector('.display-row h3').textContent"), 'Display 1');
-      assert.equal(await evaluate("document.querySelector('.display-section__meta').textContent"), '1 connected display');
+      assert.equal(await evaluate("document.querySelector('.display-row h3').textContent"), 'Display 1 · focused');
     });
-    await t.test('display shows negative coordinates and mixed scaling without settings controls', async () => {
+    await t.test('minimal display list escapes names and stays within the popup bounds', async () => {
       await load('display');
-      const text = await evaluate("document.getElementById('system-content').textContent");
-      for (const value of ['Display', '2 connected displays', 'This bar', 'Left', '2560 x 1440', '150%', '-2560, -200', 'Main', '100%']) {
-        assert(text.includes(value), value);
-      }
-      assert.equal(await evaluate("document.querySelectorAll('#system-content input').length"), 0);
-      assert.equal(await evaluate("document.querySelectorAll('.display-row').length"), 2);
-      assert.equal(await evaluate("document.querySelectorAll('.display-row--current').length"), 1);
-      assert(await evaluate('document.body.scrollHeight <= innerHeight'));
-      await evaluate(`window.__test.monitors = Array.from({ length: 6 }, (_, index) => ({
+      await evaluate(`window.__test.monitors = Array.from({ length: 20 }, (_, index) => ({
         name: index === 0 ? '<script>display</script>' : null,
         position: { x: -1080 * index, y: -200 },
         size: { width: 1080, height: 1920 }, scaleFactor: 1.5,
-      }))`);
-      await click('Refresh displays');
+      })); window.__reopenPopup('display');`);
       await pause(25);
-      assert.equal(await evaluate("document.querySelectorAll('.display-row').length"), 6);
-      assert.equal(await evaluate("[...document.querySelectorAll('.display-details dd')].filter(node => node.textContent === 'Portrait').length"), 6);
+      assert.equal(await evaluate("document.querySelectorAll('.display-row').length"), 20);
       assert.equal(await evaluate("document.querySelector('#system-content script') !== null"), false);
-      assert.match(await evaluate("document.getElementById('system-content').textContent"), /Display 6/);
+      assert.match(await evaluate("document.getElementById('system-content').textContent"), /Display 20/);
       assert(await evaluate(`(() => {
         const panel = document.getElementById('system-content');
         panel.scrollTop = panel.scrollHeight;
@@ -1069,7 +1116,8 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert.equal(await evaluate("document.querySelector('.hero__value').textContent"), '—');
       assert.equal(await evaluate("document.querySelector('.battery-progress') === null"), true);
       await evaluate(`window.__test.data.battery = { chargePercent: 72, healthPercent: 91,
-        isCharging: true, state: 'charging' }; window.__test.notify()`);
+        isCharging: true, state: 'charging', cycleCount: 93, timeTillFull: 960000,
+        powerConsumption: 16.4 }; window.__test.notify()`);
       const result = await evaluate(`(() => {
         const panel = document.getElementById('system-content');
         const progress = panel.querySelector('.battery-progress');
@@ -1089,14 +1137,16 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
           iconFill: Number(panel.querySelector('.battery__fill').getAttribute('height')),
           flat: panel.querySelectorAll('.card, .stat, .badge, .details-grid').length === 0,
           sections: [...panel.querySelectorAll('h2')].map(node => node.textContent),
-          buttonRadius: getComputedStyle(panel.querySelector('.controls button')).borderRadius,
+          labels: [...panel.querySelectorAll('dt')].map(node => node.textContent),
+          values: [...panel.querySelectorAll('dd')].map(node => node.textContent),
+          buttons: panel.querySelectorAll('button').length,
           calls: window.__test.calls,
         };
       })()`);
       assert.equal(result.headerHidden, true);
       assert.equal(result.labelledBy, 'power-title');
       assert.equal(result.title, 'Battery');
-      assert.equal(result.meta, 'CHARGING');
+      assert.equal(result.meta, 'SOAKING AMPS');
       assert.equal(result.value, '72%');
       assert.match(result.font, /JetBrainsMono/);
       assert.equal(result.padding, '14px');
@@ -1107,8 +1157,10 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert.equal(result.charging, 'true');
       assert(Math.abs(result.iconFill - 14 * 0.72) < 0.01);
       assert.equal(result.flat, true);
-      assert.deepEqual(result.sections, ['System', 'Drives', 'Session']);
-      assert.equal(result.buttonRadius, '0px');
+      assert.deepEqual(result.sections, []);
+      assert.deepEqual(result.labels, ['Battery size', 'Time to full', 'Charge cycles', 'Charging']);
+      assert.deepEqual(result.values, ['38Wh', '16m', '93', '16.4W']);
+      assert.equal(result.buttons, 0);
       assert.deepEqual(result.calls, []);
       await client.call('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
       assert.equal(await evaluate("getComputedStyle(document.querySelector('.battery-progress > span')).animationName"), 'none');
@@ -1146,32 +1198,17 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
         return { body: document.body.scrollHeight, height: innerHeight, scroll: panel.scrollTop,
           width: panel.scrollWidth, clientWidth: panel.clientWidth };
       })()`);
-      assert(overflow.body <= overflow.height && overflow.scroll > 0 && overflow.width <= overflow.clientWidth,
+      assert(overflow.body <= overflow.height && overflow.scroll === 0 && overflow.width <= overflow.clientWidth,
         JSON.stringify(overflow));
     });
-    await t.test('power preserves confirmation through provider updates and exposes all drives', async () => {
+    await t.test('battery popup excludes system details and session actions', async () => {
       await load('power');
-      let text = await evaluate("document.getElementById('system-content').textContent");
-      assert(await evaluate(`document.body.scrollHeight <= innerHeight &&
-        getComputedStyle(document.getElementById('system-content')).overflowY === 'auto'`));
-      for (const value of ['No battery data', '38%', '4.0 GiB / 16.0 GiB', 'C:', 'D:', '80%', '50%']) {
-        assert(text.includes(value), value);
-      }
-      await click('Shut down');
-      assert.equal(await evaluate('window.__test.calls.length'), 0);
-      assert.equal(await evaluate("document.getElementById('power-confirmation').hidden"), false);
-      assert.equal(await evaluate('document.activeElement.textContent'), 'Cancel');
       await evaluate('window.__test.notify()');
-      assert.equal(await evaluate("document.getElementById('power-confirmation').hidden"), false);
-      await click('Cancel');
-      assert.equal(await evaluate('window.__test.calls.length'), 0);
-      await click('Log out');
-      await click('Confirm');
-      await pause(25);
-      assert.deepEqual(await evaluate('window.__test.calls'), [['shell', 'shutdown', ['/l']]]);
-      await click('Lock');
-      await pause(25);
-      assert.deepEqual(await evaluate('window.__test.calls.at(-1)'), ['shell', 'rundll32.exe', ['user32.dll,LockWorkStation']]);
+      const text = await evaluate("document.getElementById('system-content').textContent");
+      for (const value of ['CPU', 'Memory', 'Drives', 'Session', 'Health', 'Shut down', 'Log out', 'Lock', 'Power profile']) {
+        assert(!text.includes(value), value);
+      }
+      assert.equal(await evaluate("document.getElementById('power-confirmation') === null"), true);
     });
   } finally {
     client?.close();

@@ -1,4 +1,10 @@
-# My bar
+# Winarchy
+
+Omarchy-inspired desktop bar for Windows, powered by Zebar.
+
+## Startup
+
+`zebar/settings.json` selects `winarchy / bar / default` as the only startup widget. GlazeWM launches Zebar on startup and stops it on shutdown; the existing Windows GlazeWM autostart therefore also starts Winarchy after sign-in. Restarting Zebar or GlazeWM loads Winarchy automatically. The popup is preloaded by the bar, not separately configured as a startup widget.
 
 ## Bar background
 
@@ -11,6 +17,24 @@ Restart Zebar after updating. Bar startup preloads one native popup WebView and 
 Subsequent openings, type changes and moves between monitor bars reuse the same WebView. Closing hides the window instead of destroying it. One hidden WebView stays alive until Zebar exits. No extra npm build or local SDK bundle is needed.
 
 Each opening gets fresh content and a new request ID. Hiding or replacing a session stops its providers, timers, sizing observer and storage/resize listeners; no popup polling continues while hidden. Provider unsubscriptions finish before the next session subscribes to the same config. Stale focus/outside-click requests cannot dismiss a replacement, and a destroyed or failed cached window is recreated on the next click. The native window is shown while CSS is still transparent before waiting for paint, because hidden WebViews can suspend animation frames.
+
+## Audio crash workaround
+
+Only the persistent monitor bars subscribe to Zebar's native audio provider. The Audio popup receives serializable snapshots through `BroadcastChannel` and routes volume/mute commands to one responding bar, so multi-monitor desktops do not execute a command twice. Closing/replacing the popup closes only its channel, timer and pending requests; it never creates, stops or restarts the native audio provider. Device selection remains the existing narrowly permitted one-shot popup shell command; subsequent state comes from the bar.
+
+This avoids Zebar 3.3.1 stopping its shared audio provider on popup close and leaving an endpoint notification callback registered after freeing it. Command failures/timeouts are reported without automatic retries. Missing bars disable controls; there is deliberately no fallback native popup provider. This is a lifecycle workaround, not a fix for all native audio bugs. Restart Zebar once after updating to discard any callbacks left behind by the old code. No upstream changes or additional shell permissions are required.
+
+## Display popup
+
+The Display popup is a minimal, read-only panel matching the other Omarchy-style popups: monospace typography, square accent border, flat sections and monitor rows. It shows the current monitor's Windows scale and connected displays, with the current monitor highlighted. Resolution and per-monitor scale are available in each row's tooltip. There are no settings links, brightness/text-size controls, refresh buttons or explanatory footers. Data is refreshed on each opening using Zebar's monitor API; no shell commands or extra display permissions are needed. Restart Zebar to unload the previously added display-helper permissions.
+
+## Battery popup
+
+The compact battery popup shows charge, a charge bar, full-charge capacity (Wh), cycles, time to full and charging/discharging watts. Missing firmware data is shown as `—`. Capacity is queried once per opening with a read-only Windows CIM command; the other values come from Zebar. System/drive details, health and session actions are removed. Power-profile controls are intentionally omitted because Windows power modes are not uniformly available through simple power-plan commands. Restart Zebar to load the added capacity-query permission.
+
+## Bluetooth background status
+
+The bar refreshes the status of known/paired Bluetooth devices every 30 seconds, including while the popup is closed. One monitor bar holds a polling lease to avoid duplicate background queries. Only paired/connected devices are cached; nearby discovery runs exclusively while the popup is open (every 10 seconds, with an eight-second native search and no overlapping scans). The popup displays the paired cache immediately, then refreshes live status. Late background reads do not overwrite a newer popup cache. Query failures preserve the last cached display; blocked storage disables background polling without affecting the popup's live queries. Restart Zebar after changing `zpack.json` to load the bar's added status-only permission; pairing, discovery and radio changes remain popup-only.
 
 ## Dedicated GlobalProtect popup
 
@@ -31,7 +55,7 @@ An accepted click is shown as pending until adapter status matches. At the first
 ## Tests
 
 ```sh
-node --experimental-vm-modules --test zebar/my-bar/tests/*.test.mjs
+node --experimental-vm-modules --test zebar/winarchy/tests/*.test.mjs
 ```
 
 Run from the `.glzr` directory. On Windows, the browser suite uses installed Edge with mocked native APIs; it does not connect or disconnect the real VPN.

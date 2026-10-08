@@ -40,7 +40,7 @@ public static class GlobalProtectButton {
   [DllImport("user32.dll", SetLastError=true)] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
   [DllImport("user32.dll", SetLastError=true)] static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
   public static string PlaceBesidePopup(IntPtr client) {
-    var popup = FindWindow(null, "Zebar - my-bar / popup");
+    var popup = FindWindow(null, "Zebar - winarchy / popup");
     if (popup == IntPtr.Zero || !IsWindowVisible(popup)) return null;
     uint pid;
     GetWindowThreadProcessId(popup, out pid);

@@ -9,10 +9,10 @@ import { waitForPopupSessionEnd } from './popup-session.mjs';
 import { createOutsideClickWatcher, spawnOutsideClickProcess } from './popup-dismissal.mjs';
 
 const widget = zebar.currentWidget();
-const stateKey = `my-bar:popup:${widget.packId}`;
+const stateKey = `winarchy:popup:${widget.packId}`;
 const lockName = `${stateKey}:lifecycle`;
-const readyEvent = 'my-bar:popup-ready';
-const openEvent = 'my-bar:popup-open';
+const readyEvent = 'winarchy:popup-ready';
+const openEvent = 'winarchy:popup-open';
 const windowKey = `${stateKey}:window`;
 const popupTitle = `Zebar - ${widget.packId} / popup`;
 const barTitle = `Zebar - ${widget.packId} / bar`;

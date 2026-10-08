@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createBarZOrder } from '../widgets/shared/bar-z-order.mjs';
 
-test('bar stays above other window shadows without changing workspace highlights', async () => {
+test('bar stays above other window shadows and focused workspaces have no background highlight', async () => {
   const pack = JSON.parse(await readFile(new URL('../zpack.json', import.meta.url), 'utf8'));
   assert.equal(pack.widgets.find(widget => widget.name === 'bar').zOrder, 'top_most');
   assert.equal(pack.widgets.find(widget => widget.name === 'bar').transparent, true);
@@ -12,8 +12,8 @@ test('bar stays above other window shadows without changing workspace highlights
   assert.match(html, /--ctp-base: #1e1e2e;/);
   assert.match(html, /background: var\(--ctp-base\);/);
   assert.match(html, /updateBarZOrder\(glazewm\)/);
-  assert.match(html, /\.ws-v1 \.workspace\.is-focused \{\s*background: var\(--ctp-surface0\);/);
-  assert.match(html, /\.ws-v3 \.workspace\.is-focused \{\s*background: var\(--ctp-surface1\);/);
+  assert.doesNotMatch(html, /\.workspace\.is-focused\s*\{[^}]*background:/);
+  assert.match(html, /\.workspace\.is-focused::after,/);
 });
 
 test('fullscreen can cover the bar and tiling restores its shadow-free layer', async () => {

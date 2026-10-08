@@ -198,7 +198,7 @@ export function mergeBluetoothSnapshot(previous, snapshot, scanning = false) {
     .filter(d => !d.paired && !d.connected && !ids.has(d.id));
   return { ...snapshot, devices: [...known, ...(snapshot.enabled ? nearby : [])] };
 }
-export const bluetoothCacheKey = 'my-bar.bluetooth.paired.v1';
+export const bluetoothCacheKey = 'winarchy.bluetooth.paired.v1';
 export function cachedBluetoothSnapshot(storage) {
   try {
     const state = JSON.parse(storage.getItem(bluetoothCacheKey));

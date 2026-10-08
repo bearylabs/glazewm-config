@@ -41,32 +41,49 @@ export function renderBluetooth(root) {
   track.setAttribute('aria-hidden', 'true');
   track.append(node('span', undefined, 'audio-switch__knob'));
   toggle.append(track);
-  heading.append(icon, body, toggle);
-  const scan = button('Scan for devices', () => void run(state ? 'scan' : 'status'), 'bluetooth-scan');
+  heading.append(icon, body);
   const lists = node('div', undefined, 'bluetooth-lists');
   const sections = new Map();
   const rows = new Map();
+  const deviceMessages = new Map();
   for (const [key, label] of [['connected', 'Connected'], ['paired', 'Paired'], ['available', 'Available']]) {
     const section = node('section', undefined, 'bluetooth-section');
     section.append(node('h2', label));
     const content = node('div');
     section.append(content);
-    const searching = node('p', 'Scanning for nearby devices…', 'note');
-    if (key === 'available') section.append(searching);
-    sections.set(key, { section, content, searching });
+    sections.set(key, { section, content });
     lists.append(section);
   }
   const status = node('p', '', 'note');
   status.id = 'bluetooth-status';
   status.setAttribute('role', 'status');
-  const note = node('p', 'Put new devices into pairing mode. PIN and confirmation dialogs open in a separate Windows window. Bluetooth LE connections are managed by Windows.', 'note');
-  const settings = button('Windows Bluetooth settings', () => {
+  const settings = button('', () => {
     void openBluetoothSettings(zebar.shellExec).catch(showError);
-  }, 'bluetooth-settings');
+  }, 'network-vpn__open');
   settings.id = 'bluetooth-settings';
-  root.replaceChildren(heading, scan, lists, status, note, settings);
+  settings.setAttribute('aria-label', 'Open Windows Bluetooth settings');
+  settings.title = 'Open Windows Bluetooth settings';
+  const openIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  openIcon.setAttribute('viewBox', '0 0 24 24');
+  openIcon.setAttribute('aria-hidden', 'true');
+  openIcon.setAttribute('focusable', 'false');
+  const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  arrow.setAttribute('d', 'M6 18 18 6M6 6h12v12');
+  arrow.setAttribute('fill', 'none');
+  arrow.setAttribute('stroke', 'currentColor');
+  arrow.setAttribute('stroke-width', '2');
+  arrow.setAttribute('stroke-linecap', 'round');
+  arrow.setAttribute('stroke-linejoin', 'round');
+  openIcon.append(arrow);
+  settings.append(openIcon);
+  heading.append(settings, toggle);
+  root.replaceChildren(heading, lists, status);
 
-  function showError(error) {
+  function showError(error, id) {
+    if (id) {
+      deviceMessages.set(id, { text: error.message ?? String(error), error: true });
+      return;
+    }
     failed = true;
     status.textContent = error.message ?? String(error);
     status.classList.add('error');
@@ -84,16 +101,28 @@ export function renderBluetooth(root) {
     image.append(createIcon('bluetooth'));
     const info = node('span', undefined, 'audio-device__name');
     const name = node('span', '', 'bluetooth-name');
-    const description = node('span', '', 'bluetooth-state');
-    info.append(name, description);
+    const message = node('span', '', 'bluetooth-state');
+    message.hidden = true;
+    message.setAttribute('role', 'status');
+    info.append(name, message);
     control.append(image, info);
-    const forget = button('×', () => {
+    const forget = button('', () => {
       const current = row.device;
-      if (window.confirm(`Remove pairing with ${current.name}?`)) void run('forget', current.id);
+      void run('forget', current.id);
     }, 'bluetooth-forget');
     forget.title = 'Forget device';
+    const forgetIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    forgetIcon.setAttribute('viewBox', '0 0 24 24');
+    forgetIcon.setAttribute('aria-hidden', 'true');
+    forgetIcon.setAttribute('focusable', 'false');
+    const cancel = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    // Material Design Cancel: filled circle with a cut-out cross.
+    cancel.setAttribute('d', 'M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z');
+    cancel.setAttribute('fill', 'currentColor');
+    forgetIcon.append(cancel);
+    forget.append(forgetIcon);
     row.append(control, forget);
-    Object.assign(row, { device, control, forget, name, description });
+    Object.assign(row, { device, control, forget, name, message });
     return row;
   }
   function render() {
@@ -101,15 +130,12 @@ export function renderBluetooth(root) {
     toggle.disabled = busy || !state?.available;
     toggle.setAttribute('aria-checked', String(Boolean(state?.enabled)));
     toggle.title = state?.enabled ? 'Turn Bluetooth off' : 'Turn Bluetooth on';
-    scan.disabled = busy || scanning || refreshing || Boolean(state && !state.enabled);
-    scan.textContent = scanning ? 'Scanning…' : !state && failed ? 'Retry' : 'Scan for devices';
     meta.textContent = !state ? failed ? 'Unavailable' : 'Loading…' : !state.available ? 'No adapter' : state.enabled ? 'On' : 'Turned off';
     root.setAttribute('aria-busy', String(busy));
     const groups = bluetoothGroups(state?.devices);
     const visibleIds = new Set();
-    for (const [key, { section, content, searching }] of sections) {
-      section.hidden = !state?.enabled || (!groups[key].length && !(key === 'available' && scanning));
-      searching.hidden = !scanning;
+    for (const [key, { section, content }] of sections) {
+      section.hidden = !state?.enabled || !groups[key].length;
       if (key === 'available') content.setAttribute('aria-busy', String(scanning));
       const desiredRows = [];
       for (const device of groups[key]) {
@@ -118,7 +144,11 @@ export function renderBluetooth(root) {
         if (!row) { row = makeRow(device); rows.set(device.id, row); }
         row.device = device;
         row.name.textContent = device.name;
-        row.description.textContent = device.connected ? 'Connected · click to disconnect' : device.paired ? 'Paired · click to connect' : 'Click to pair';
+        const deviceMessage = deviceMessages.get(device.id);
+        row.message.textContent = deviceMessage?.text ?? '';
+        row.message.hidden = !deviceMessage;
+        row.message.classList.toggle('error', Boolean(deviceMessage?.error));
+        row.message.setAttribute('role', deviceMessage?.error ? 'alert' : 'status');
         row.control.dataset.deviceId = device.id;
         row.control.dataset.action = device.connected ? 'disconnect' : device.paired ? 'connect' : 'pair';
         row.control.setAttribute('aria-pressed', String(device.connected));
@@ -155,7 +185,9 @@ export function renderBluetooth(root) {
     else {
       busy = true;
       revision++;
-      status.textContent = ({ pair: 'Pairing… Check the Windows pairing dialog.', connect: 'Connecting…', disconnect: 'Disconnecting…', forget: 'Removing pairing…', on: 'Turning Bluetooth on…', off: 'Turning Bluetooth off…' })[action];
+      const text = ({ pair: 'Pairing… Check the Windows pairing dialog.', connect: 'Connecting…', disconnect: 'Disconnecting…', forget: 'Removing pairing…', on: 'Turning Bluetooth on…', off: 'Turning Bluetooth off…' })[action];
+      if (id) deviceMessages.set(id, { text, error: false });
+      else status.textContent = text;
     }
     const startedAt = revision;
     render();
@@ -165,6 +197,7 @@ export function renderBluetooth(root) {
       const snapshot = result ?? await executeBluetooth(zebar.shellExec, 'status');
       if (disposed) return;
       state = mergeBluetoothSnapshot(state, snapshot, action === 'scan');
+      if (id) deviceMessages.delete(id);
       showState();
       if (['pair', 'connect', 'disconnect', 'on'].includes(action)) {
         // Windows may finish auto-connecting/installing audio endpoints after pairing.
@@ -175,7 +208,7 @@ export function renderBluetooth(root) {
       }
     } catch (error) {
       if (!disposed && (!query || startedAt === revision)) {
-        showError(error);
+        showError(error, id);
       }
     } finally {
       if (action === 'scan') scanning = false;
@@ -188,7 +221,9 @@ export function renderBluetooth(root) {
   void run('status').then(() => { if (state?.enabled) void run('scan'); });
   // Paired-only status reads are separate from discovery and never disable controls.
   const statusTimer = setInterval(() => void run('status'), 10000);
-  const scanTimer = setInterval(() => { if (state?.enabled) void run('scan'); }, 15000);
+  // Native discovery takes eight seconds, plus PowerShell/WinRT startup time.
+  // Ten seconds keeps discovery frequent without launching overlapping scans.
+  const scanTimer = setInterval(() => { if (state?.enabled) void run('scan'); }, 10000);
   onPopupSessionEnd(() => {
     disposed = true;
     clearInterval(statusTimer);

@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>my-bar</title>
+    <title>winarchy</title>
     <style>
       :root {
         color-scheme: dark;
@@ -90,24 +90,11 @@
       .workspace.is-active { color: var(--ctp-subtext0); }
       .workspace:hover { background: var(--ctp-surface0); color: var(--ctp-text); }
       .ws-v1 .workspace.is-focused {
-        background: var(--ctp-surface0);
         color: var(--ctp-lavender);
         font-weight: 600;
       }
       .ws-v2 .workspace.is-focused { color: var(--ctp-text); font-weight: 600; }
-      .ws-v2 .workspace.is-focused::after {
-        content: '';
-        position: absolute;
-        left: 50%;
-        bottom: 1px;
-        width: 10px;
-        height: 2px;
-        border-radius: 1px;
-        background: var(--ctp-lavender);
-        transform: translateX(-50%);
-      }
       .ws-v3 .workspace.is-focused {
-        background: var(--ctp-surface1);
         color: var(--ctp-text);
         font-weight: 600;
       }
@@ -125,6 +112,7 @@
         cursor: pointer;
       }
       .clock, .status { position: relative; }
+      .workspace.is-focused::after,
       .clock[aria-expanded='true']::after,
       .status[aria-expanded='true']::after {
         content: '';
@@ -207,7 +195,7 @@
 
       </button>
       <button class="status status--power" id="power-trigger" type="button"
-              aria-label="Open power and system information" aria-haspopup="dialog" aria-expanded="false" data-popup-trigger="power" data-state="unknown">
+              aria-label="Open battery information" aria-haspopup="dialog" aria-expanded="false" data-popup-trigger="power" data-state="unknown">
 
       </button>
     </div>
@@ -218,7 +206,9 @@
       import { batteryIndicator, powerStatusArgs } from '../shared/battery-model.mjs';
       import { createIcon, createBatteryIcon } from '../shared/icons.mjs';
       import { startNetworkBackground } from '../shared/network-background.mjs';
+      import { startBluetoothBackground } from '../shared/bluetooth-background.mjs';
       import { createBarZOrder } from '../shared/bar-z-order.mjs';
+      import { createAudioOwner } from '../shared/audio-bridge.mjs';
       import { readSnapshot, vpnSnapshotValid } from '../shared/snapshot-cache.mjs';
 
       for (const [id, icons] of Object.entries({
@@ -278,8 +268,12 @@
         network: { type: 'network', refreshInterval: 30000 },
         audio: { type: 'audio' },
       });
+      const audioOwner = createAudioOwner(() => ({
+        audio: providers.outputMap.audio, error: providers.errorMap.audio,
+      }));
+      window.addEventListener('pagehide', () => audioOwner.close(), { once: true });
       const vpnEl = document.getElementById('globalprotect-trigger');
-      const vpnCacheKey = 'my-bar.network.vpn.v1';
+      const vpnCacheKey = 'winarchy.network.vpn.v1';
       function renderVpn(vpn) {
         vpnEl.hidden = vpn?.available !== true;
         vpnEl.classList.toggle('is-muted', vpn?.connected !== true);
@@ -297,6 +291,8 @@
       });
       const stopNetworkBackground = startNetworkBackground(zebar.shellExec, () => providers.outputMap.network, { onVpn: renderVpn });
       window.addEventListener('pagehide', stopNetworkBackground, { once: true });
+      const stopBluetoothBackground = startBluetoothBackground(zebar.shellExec);
+      window.addEventListener('pagehide', stopBluetoothBackground, { once: true });
       const timeEl = document.getElementById('time');
       const workspacesEl = document.getElementById('workspaces');
       const modesEl = document.getElementById('modes');
@@ -334,6 +330,7 @@
       const weekday = new Intl.DateTimeFormat(navigator.language, { weekday: 'long' });
       let glazewm = null;
       providers.onError(errors => {
+        audioOwner.publish();
         for (const [name, error] of Object.entries(errors)) {
           if (error) reportPopupError(new Error(`${name}: ${error.message ?? error}`));
         }
@@ -341,6 +338,7 @@
         renderNetwork(providers.outputMap.network);
       });
       providers.onOutput(output => {
+        audioOwner.publish();
         if (output.date) {
           const time = `${weekday.format(new Date(output.date.now))} ${output.date.formatted}`;
           if (timeEl.textContent !== time) timeEl.textContent = time;

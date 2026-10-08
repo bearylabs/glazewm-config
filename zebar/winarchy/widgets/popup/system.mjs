@@ -1,9 +1,11 @@
 import * as zebar from 'https://esm.sh/zebar@3.3.1';
-import { availableMonitors, currentMonitor } from 'https://esm.sh/@tauri-apps/api@2.0.2/window';
+import { renderDisplay } from './display.mjs';
 import { networkConnection, linkRate, ipv4 } from '../shared/network-model.mjs';
 import { outputVolumeName, selectOutputDevice } from '../shared/audio-model.mjs';
+import { createAudioClient } from '../shared/audio-bridge.mjs';
 import { createBatteryIcon, createIcon } from '../shared/icons.mjs';
-import { diskUsage, executePowerAction, gib, percent, powerCommands } from '../shared/system-model.mjs';
+import { percent } from '../shared/system-model.mjs';
+import { batteryDetails, batteryCapacityArgs } from '../shared/battery-model.mjs';
 
 import { renderBluetooth } from './bluetooth.mjs';
 import { renderGlobalProtect } from './globalprotect.mjs';
@@ -140,6 +142,7 @@ function renderAudio(root, reportError) {
   let pendingVolume = 0;
   let muteBusy = false;
   let switchBusy = false;
+  let disposed = false;
 
   async function switchDevice(deviceId) {
     if (switchBusy || muteBusy) return;
@@ -148,9 +151,10 @@ function renderAudio(root, reportError) {
     update(group.outputMap, group.errorMap);
     try {
       await volumeQueue;
+      if (disposed) return;
       await selectOutputDevice(zebar.shellExec, group.outputMap.audio, deviceId);
     } catch (error) {
-      reportError(error);
+      if (!disposed) reportError(error);
     } finally {
       switchBusy = false;
       update(group.outputMap, group.errorMap);
@@ -160,13 +164,15 @@ function renderAudio(root, reportError) {
   function run(action) {
     muteBusy = true;
     mute.disabled = true;
-    Promise.resolve().then(action).catch(reportError).finally(() => {
-      muteBusy = false;
-      update(group.outputMap, group.errorMap);
-    });
+    Promise.resolve().then(() => { if (!disposed) return action(); })
+      .catch(error => { if (!disposed) reportError(error); }).finally(() => {
+        muteBusy = false;
+        update(group.outputMap, group.errorMap);
+      });
   }
 
   function update(output, errors) {
+    if (disposed) return;
     const device = output.audio?.defaultPlaybackDevice;
     status.textContent = errors.audio
       ? `Audio: ${errors.audio.message ?? errors.audio}`
@@ -220,7 +226,12 @@ function renderAudio(root, reportError) {
     slider.style.setProperty('--audio-progress', `${Math.max(0, Math.min(100, volume ?? 0))}%`);
     heading.querySelector('.hero__meta').textContent = outputVolumeName(volume, muted).toUpperCase();
   }
-  const group = subscribe({ audio: { type: 'audio' } }, update);
+  // No native provider subscription here: closing this session must not stop
+  // the persistent bar's shared audio backend (Zebar 3.3.1 callback lifetime bug).
+  const group = createAudioClient((output, errors) => {
+    if (!disposed) update(output, errors);
+  });
+  onPopupSessionEnd(() => { disposed = true; group.close(); });
   slider.addEventListener('input', () => {
     const audio = group.outputMap.audio;
     const device = audio?.defaultPlaybackDevice;
@@ -234,11 +245,12 @@ function renderAudio(root, reportError) {
     slider.setAttribute('aria-valuetext', value.textContent);
     pendingVolume++;
     volumeQueue = volumeQueue.then(async () => {
+      if (disposed) return;
       if (group.outputMap.audio?.defaultPlaybackDevice?.deviceId !== device.deviceId) {
         throw new Error('Output device changed. Adjust volume again.');
       }
       await audio.setVolume(volume, { deviceId: device.deviceId });
-    }).catch(reportError).finally(() => {
+    }).catch(error => { if (!disposed) reportError(error); }).finally(() => {
       pendingVolume--;
       if (!pendingVolume) update(group.outputMap, group.errorMap);
     });
@@ -246,8 +258,8 @@ function renderAudio(root, reportError) {
 }
 
 function renderNetwork(root, reportError) {
-  const networkCacheKey = 'my-bar.network.connection.v1';
-  const trafficCacheKey = 'my-bar.network.traffic.v1';
+  const networkCacheKey = 'winarchy.network.connection.v1';
+  const trafficCacheKey = 'winarchy.network.traffic.v1';
   const cachedNetwork = readSnapshot(networkCacheKey, networkSnapshotValid);
   const cachedTraffic = readSnapshot(trafficCacheKey, trafficSnapshotValid);
   let liveNetworkSeen = false;
@@ -377,152 +389,27 @@ function renderNetwork(root, reportError) {
   });
 }
 
-async function renderDisplay(root, reportError) {
-  const content = element('div');
-  let busy = false;
-  const refresh = button('Refresh displays', () => void update());
-  refresh.id = 'display-refresh';
-  refresh.className = 'display-refresh';
-  const summary = hero('monitor', 'Display', 'READ-ONLY OVERVIEW');
-  summary.classList.add('display-hero');
-  summary.querySelector('.hero__title').id = 'display-title';
-  summary.append(refresh);
-  root.append(summary, content);
-  async function update() {
-    if (busy) return;
-    busy = true;
-    refresh.disabled = true;
-    content.setAttribute('aria-busy', 'true');
-    try {
-      const [monitors, current] = await Promise.all([availableMonitors(), currentMonitor()]);
-      if (!monitors.length) throw new Error('No connected displays reported.');
-      const nodes = [];
-      if (current && Number.isFinite(current.scaleFactor)) {
-        const scale = element('section', undefined, 'display-section display-scale');
-        const scaleHeading = element('div', undefined, 'display-section__heading');
-        scaleHeading.append(element('h2', 'Scale'));
-        if (monitors.length > 1 && current.name) {
-          const name = element('span', current.name, 'display-section__meta');
-          name.title = current.name;
-          scaleHeading.append(name);
-        }
-        const value = element('div', percent(current.scaleFactor * 100), 'display-scale__value');
-        scale.append(scaleHeading, value);
-        nodes.push(scale);
-      }
-      const displays = element('section', undefined, 'display-section');
-      const displaysHeading = element('div', undefined, 'display-section__heading');
-      displaysHeading.append(element('h2', 'Displays'), element('span',
-        `${monitors.length} connected ${monitors.length === 1 ? 'display' : 'displays'}`, 'display-section__meta'));
-      const list = element('div', undefined, 'display-list');
-      displays.append(displaysHeading, list);
-      for (const [index, monitor] of monitors.entries()) {
-        const isCurrent = Boolean(current && monitor.position.x === current.position.x &&
-          monitor.position.y === current.position.y && monitor.size.width === current.size.width &&
-          monitor.size.height === current.size.height);
-        const row = element('article', undefined, `display-row${isCurrent ? ' display-row--current' : ''}`);
-        const heading = element('div', undefined, 'display-row__heading');
-        const icon = element('span', undefined, 'display-row__icon');
-        icon.append(createIcon('monitor'));
-        const label = element('h3', monitor.name || `Display ${index + 1}`);
-        label.title = label.textContent;
-        heading.append(icon, label);
-        if (isCurrent) heading.append(element('span', 'This bar', 'display-row__state'));
-        row.append(heading, details([
-          ['Resolution', `${monitor.size.width} x ${monitor.size.height}`],
-          ['Scaling', percent(monitor.scaleFactor * 100)],
-          ['Desktop position', `${monitor.position.x}, ${monitor.position.y}`],
-          ['Orientation', monitor.size.height > monitor.size.width ? 'Portrait' : 'Landscape'],
-        ], 'display-details'));
-        list.append(row);
-      }
-      nodes.push(displays, element('p', 'Resolution and position are in physical pixels. Refresh rate, brightness and monitor model are not exposed by this API. No display settings are changed.', 'note display-note'));
-      content.replaceChildren(...nodes);
-    } catch (error) {
-      content.replaceChildren(element('p', error.message ?? String(error), 'error'));
-      reportError(error);
-    } finally {
-      busy = false;
-      refresh.disabled = false;
-      content.setAttribute('aria-busy', 'false');
-    }
-  }
-  await update();
-}
-
-function renderPower(root, reportError) {
+function renderPower(root) {
   const stats = element('div', undefined, 'power-stats');
-  const actions = element('section', undefined, 'power-section power-actions');
-  const controls = element('div', undefined, 'controls');
-  actions.append(element('h2', 'Session'), controls);
-  const confirmation = element('div');
-  confirmation.id = 'power-confirmation';
-  confirmation.hidden = true;
-  const prompt = element('p');
-  let pending = null;
-  let timer;
-  let busy = false;
-  let origin;
-  function cancel() {
-    clearTimeout(timer);
-    pending = null;
-    confirmation.hidden = true;
-    origin?.focus();
-  }
-  async function execute(action, confirmed = false) {
-    if (busy) return;
-    busy = true;
-    for (const control of controls.children) control.disabled = true;
-    yes.disabled = true;
-    no.disabled = true;
-    try {
-      await executePowerAction(zebar.shellExec, action, confirmed);
-    } catch (error) {
-      reportError(error);
-    } finally {
-      busy = false;
-      for (const control of controls.children) control.disabled = false;
-      yes.disabled = false;
-      no.disabled = false;
-    }
-  }
-  const yes = button('Confirm', () => {
-    const action = pending;
-    cancel();
-    if (action) void execute(action, true);
-  });
-  const no = button('Cancel', cancel);
-  confirmation.append(prompt, yes, no);
-  for (const [action, label] of [['lock', 'Lock'], ['logout', 'Log out'], ['shutdown', 'Shut down']]) {
-    const control = button(label, () => {
-      if (action === 'lock') {
-        cancel();
-        void execute(action);
-        return;
-      }
-      origin = control;
-      pending = action;
-      prompt.textContent = powerCommands[action].confirmation;
-      confirmation.hidden = false;
-      clearTimeout(timer);
-      timer = setTimeout(cancel, 8000);
-      no.focus();
-    });
-    controls.append(control);
-  }
-  root.append(stats, actions, confirmation);
-  onPopupSessionEnd(() => clearTimeout(timer));
-  subscribe({
+  root.append(stats);
+  let capacity = null;
+  let disposed = false;
+  onPopupSessionEnd(() => { disposed = true; });
+  void zebar.shellExec('powershell.exe', batteryCapacityArgs).then(result => {
+    if (disposed || result.code !== 0) return;
+    const value = JSON.parse(result.stdout);
+    capacity = Number.isFinite(value) && value > 0 ? value / 1000 : null;
+    update(group.outputMap, group.errorMap);
+  }).catch(() => {}); // Unsupported firmware/WMI data remains unavailable.
+  const group = subscribe({
     battery: { type: 'battery', refreshInterval: 15000 },
-    cpu: { type: 'cpu', refreshInterval: 3000 },
-    memory: { type: 'memory', refreshInterval: 3000 },
-    disk: { type: 'disk', refreshInterval: 60000 },
-  }, (output, errors) => {
+  }, update);
+  function update(output, errors) {
     const nodes = [];
     const battery = output.battery;
     const charge = Number.isFinite(battery?.chargePercent) && battery.chargePercent >= 0 && battery.chargePercent <= 100
       ? battery.chargePercent : null;
-    const state = charge === null ? 'No battery data' : battery.isCharging ? 'Charging'
+    const state = charge === null ? 'No battery data' : battery.isCharging ? 'Soaking amps'
       : battery.state ? String(battery.state).replace(/([a-z])([A-Z])/g, '$1 $2').replaceAll('_', ' ')
         : 'Battery status unavailable';
     const heading = hero('battery-outline', 'Battery', state.toUpperCase(), charge === null ? '—' : percent(charge));
@@ -546,10 +433,7 @@ function renderPower(root, reportError) {
       progress.setAttribute('aria-valuemin', '0');
       progress.setAttribute('aria-valuemax', '100');
       progress.setAttribute('aria-valuenow', String(charge));
-      nodes.push(progress, details([
-        ['State', state],
-        ['Health', percent(battery.healthPercent)],
-      ], 'power-details battery-details'));
+      nodes.push(progress, details(batteryDetails(battery, capacity), 'power-details battery-details'));
       if (errors.battery) nodes.push(unavailable('Battery', errors.battery));
     } else {
       nodes.push(element('p', errors.battery
@@ -557,41 +441,8 @@ function renderPower(root, reportError) {
         : 'No battery data reported (desktop PCs may have no battery).', errors.battery ? 'error' : 'note'));
     }
 
-    const system = element('section', undefined, 'power-section');
-    system.append(element('h2', 'System'));
-    const entries = [];
-    if (output.cpu) {
-      entries.push(['CPU', percent(output.cpu.usage)],
-        ['CPU details', `${output.cpu.physicalCoreCount ?? 'Unavailable'} cores · ${Number.isFinite(output.cpu.frequency) ? `${output.cpu.frequency} MHz` : output.cpu.vendor ?? 'Unavailable'}`]);
-    } else system.append(unavailable('CPU', errors.cpu));
-    if (output.memory) {
-      entries.push(['Memory', percent(output.memory.usage)],
-        ['Memory used', `${gib(output.memory.usedMemory)} / ${gib(output.memory.totalMemory)}`]);
-    } else system.append(unavailable('RAM', errors.memory));
-    if (entries.length) system.append(details(entries, 'power-details'));
-    nodes.push(system);
-
-    const drives = element('section', undefined, 'power-section');
-    drives.append(element('h2', 'Drives'));
-    if (output.disk) {
-      if (!output.disk.disks.length) drives.append(element('p', 'No mounted drives reported.', 'note'));
-      for (const disk of output.disk.disks) {
-        const usage = diskUsage(disk);
-        const drive = element('div', undefined, 'power-drive');
-        const line = element('div', undefined, 'power-drive__heading');
-        const name = `${disk.mountPoint}  ${disk.name ?? disk.fileSystem ?? ''}`;
-        const label = element('strong', name);
-        label.title = name;
-        line.append(label, element('span', `${percent(usage)} used`));
-        drive.append(line);
-        if (Number.isFinite(usage)) drive.append(meter(usage));
-        drive.append(element('p', `${gib(disk.availableSpace?.bytes)} free of ${gib(disk.totalSpace?.bytes)}`, 'note'));
-        drives.append(drive);
-      }
-    } else drives.append(unavailable('Drives', errors.disk));
-    nodes.push(drives);
     stats.replaceChildren(...nodes);
-  });
+  }
 }
 
 export function renderSystemPopup(type, reportError) {
@@ -603,7 +454,7 @@ export function renderSystemPopup(type, reportError) {
   document.querySelector('header').hidden = omarchyPanel;
   document.querySelector('main').setAttribute('aria-labelledby', omarchyPanel ? `${type}-title` : 'month-label');
   document.getElementById('month-label').textContent = {
-    audio: 'Audio', network: 'Network', globalprotect: 'GlobalProtect', bluetooth: 'Bluetooth', display: 'Displays', power: 'Power & system',
+    audio: 'Audio', network: 'Network', globalprotect: 'GlobalProtect', bluetooth: 'Bluetooth', display: 'Displays', power: 'Battery',
   }[type];
   let disposed = false;
   onPopupSessionEnd(() => { disposed = true; });
