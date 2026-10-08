@@ -1,8 +1,11 @@
 general:
   # Commands to run when the WM has started. This is useful for running a
   # script or launching another application.
-  # Example: The below command launches Zebar.
-  startup_commands: ["shell-exec zebar"]
+  # Launch Win-key suppression here instead of Windows Startup.
+  # Keep these space-free paths unquoted for GlazeWM's shell-exec parser.
+  startup_commands:
+    - "shell-exec zebar"
+    - 'shell-exec C:\Users\hendrik.rudek\AppData\Local\Programs\AutoHotkey\v2\AutoHotkey64.exe C:\Users\hendrik.rudek\.glzr\scripts\disable-win-start.ahk'
 
   # Commands to run just before the WM is shutdown.
   # Example: The below command kills Zebar.
