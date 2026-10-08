@@ -6,6 +6,7 @@ general:
   startup_commands:
     - "shell-exec zebar"
     - 'shell-exec C:\Users\hendrik.rudek\AppData\Local\Programs\AutoHotkey\v2\AutoHotkey64.exe C:\Users\hendrik.rudek\.glzr\scripts\disable-win-start.ahk'
+    - 'shell-exec C:\Users\hendrik.rudek\AppData\Local\Programs\AutoHotkey\v2\AutoHotkey64.exe C:\Users\hendrik.rudek\.glzr\scripts\start-wsl.ahk'
 
   # Commands to run just before the WM is shutdown.
   # Example: The below command kills Zebar.
