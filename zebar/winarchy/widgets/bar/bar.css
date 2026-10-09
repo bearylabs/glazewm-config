@@ -55,10 +55,6 @@ body {
   transition: background-color 120ms ease, color 120ms ease;
 }
 .split { color: var(--ctp-overlay0); }
-.split:hover {
-  background: var(--ctp-surface0);
-  color: var(--ctp-text);
-}
 button:focus-visible { outline: 1px solid var(--ctp-lavender); outline-offset: -1px; }
 .split svg, .status svg { width: 16px; height: 16px; }
 .split svg { display: none; }
@@ -82,7 +78,6 @@ button:focus-visible { outline: 1px solid var(--ctp-lavender); outline-offset: -
   transition: background-color 120ms ease, color 120ms ease;
 }
 .workspace.is-active { color: var(--ctp-subtext0); }
-.workspace:hover { background: var(--ctp-surface0); color: var(--ctp-text); }
 .ws-v1 .workspace.is-focused {
   color: var(--ctp-lavender);
   font-weight: 600;

@@ -292,9 +292,9 @@ keybindings:
   - commands: ["toggle-floating --centered"]
     bindings: ["win+shift+space"]
 
-  # Change the focused window opacity.
-  # - commands: ["set-transparency --opacity 100%"]
-  #   bindings: ["win+shift+x"]
+  # Lock the Windows session.
+  - commands: ["shell-exec rundll32.exe user32.dll,LockWorkStation"]
+    bindings: ["win+shift+x"]
 
   # Change the focused window opacity.
   # - commands: ["set-transparency --opacity 95%"]

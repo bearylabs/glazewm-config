@@ -31,7 +31,7 @@ logout and lock permissions.
 
 ## Bar background
 
-The bar uses Catppuccin Mocha Base (`#1e1e2e`). Its native window stays topmost so neighboring window shadows cannot darken the background when focus changes. GlazeWM fullscreen temporarily switches it to the normal layer so fullscreen can still cover the bar. Workspace highlights are unchanged. Restart Zebar after changing the initial layer in `zpack.json`.
+The bar uses Catppuccin Mocha Base (`#1e1e2e`). Its native window stays topmost so neighboring window shadows cannot darken the background when focus changes. GlazeWM fullscreen temporarily switches it to the normal layer so fullscreen can still cover the bar. Left-side workspace and tiling-direction controls do not highlight on mouseover; focused-workspace indicators and keyboard-focus outlines remain unchanged. Restart Zebar after changing the initial layer in `zpack.json`.
 
 ## PowerToys Awake toggle
 

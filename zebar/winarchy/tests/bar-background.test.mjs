@@ -19,6 +19,13 @@ test('bar stays above other window shadows and focused workspaces have no backgr
   assert.match(css, /\.workspace\.is-focused::after,/);
 });
 
+test('left-side controls have no mouseover highlight while keyboard focus stays visible', async () => {
+  const css = await readFile(new URL('../widgets/bar/bar.css', import.meta.url), 'utf8');
+  assert.doesNotMatch(css, /\.(?:split|workspace):hover\b/);
+  assert.match(css, /button:focus-visible\s*\{[^}]*outline:/);
+  assert.match(css, /\.workspace\.is-focused::after,/);
+});
+
 test('fullscreen can cover the bar and tiling restores its shadow-free layer', async () => {
   const calls = [];
   const update = createBarZOrder(async order => calls.push(order), assert.fail);
