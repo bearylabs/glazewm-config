@@ -46,12 +46,15 @@ test('statistics select the UI adapter, not the first active Wi-Fi interface', (
   assert.equal(selectNetworkStats([selected], { ...iface, macAddress: '00:11:22:33:44:55' }), null,
     'Conflicting MAC identities cannot match by IP.');
   assert.equal(selectNetworkStats([first, selected], { ...iface, macAddress: null }), selected);
-  assert.equal(selectNetworkStats([first, selected], { ...iface, type: 'ethernet' }), null);
+  assert.equal(selectNetworkStats([first, selected], { ...iface, type: 'ethernet' }), selected);
+  assert.equal(selectNetworkStats([first, selected], { ...iface, type: 'tunnel' }), null);
+  assert.equal(selectNetworkStats([first, selected], { ...iface, type: 'ethernet', description: 'PANGP Virtual Ethernet' }), null);
   assert.throws(() => selectNetworkStats([selected, selected], iface), /Multiple/);
   for (const value of [null, {}, [{ ...selected, ipv4Addresses: null }], [{ ...selected, sent: -1 }]]) {
     assert.throws(() => selectNetworkStats(value, iface), /Invalid/);
   }
   assert(networkStatsCommand.includes('$ssids[$nic.Id.Trim'));
+  assert(networkStatsCommand.includes("'Wireless80211', 'Ethernet', 'FastEthernetT', 'FastEthernetFx', 'GigabitEthernet'"));
   assert(!networkStatsCommand.includes("-eq 'Wireless80211' } | Select-Object -First 1"));
 });
 

@@ -1185,18 +1185,18 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert.equal(result.vpn, null);
       assert.equal(result.fits, true);
       assert.deepEqual(await evaluate(`[...document.querySelectorAll('#system-content [title]')].map(node => node.getAttribute('title')).sort()`),
-        ['Copy Gateway: 192.168.1.1', 'Copy IP Address: 192.168.1.2', 'Open Windows Wi-Fi networks'].sort());
+        ['Copy Gateway: 192.168.1.1', 'Copy IP: 192.168.1.2', 'Open Windows Wi-Fi networks'].sort());
       assert.equal(await evaluate("document.querySelector('.network-diagnostics')"), null);
       assert.equal(await evaluate("document.querySelector('.network-vpn')"), null);
-      assert.equal(await evaluate("[...document.querySelectorAll('.network-traffic dt')].find(node => node.textContent === 'IP Address').nextElementSibling.textContent"), '192.168.1.2');
+      assert.equal(await evaluate("[...document.querySelectorAll('.network-traffic dt')].find(node => node.textContent === 'IP').nextElementSibling.textContent"), '192.168.1.2');
       assert(await evaluate("document.getElementById('system-content').scrollHeight < 320"));
       assert.deepEqual(await evaluate("[...document.querySelectorAll('.network-traffic dt')].map(node => node.textContent)"),
-        ['Ping', 'Link rate', 'Receiving', 'Sending', 'Downloaded', 'Uploaded', 'IP Address', 'Gateway']);
+        ['Ping', 'Link rate', 'Receiving', 'Sending', 'Downloaded', 'Uploaded', 'IP', 'Gateway']);
       await evaluate(`window.__copiedAddresses = [];
         Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
           writeText: async value => window.__copiedAddresses.push(value),
         } });
-        for (const label of ['IP Address', 'Gateway']) {
+        for (const label of ['IP', 'Gateway']) {
           const row = [...document.querySelectorAll('.network-traffic dt')].find(node => node.textContent === label);
           row.nextElementSibling.querySelector('button').click();
         }`);
@@ -1216,12 +1216,27 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
         defaultInterface: { name: 'Ethernet adapter', type: 'ethernet', receiveSpeed: 2.5e9,
           ipv4Addresses: ['10.0.0.2'], ipv6Addresses: [] },
       }; window.__test.notify()`);
-      assert.equal(await evaluate("document.getElementById('network-title').textContent"), 'Ethernet (2.5 Gb/s)');
+      assert.equal(await evaluate("document.getElementById('network-title').textContent"), 'Ethernet');
       assert.equal(await evaluate("document.getElementById('network-title').hasAttribute('title')"), false);
       assert.equal(await evaluate("document.querySelector('.hero__meta').textContent"), 'ETHERNET CONNECTION');
       assert.equal(await evaluate("document.querySelectorAll('.network-section').length"), 0);
-      assert.equal(await evaluate("document.querySelectorAll('.network-connection .network-overview dt').length"), 1, 'Ethernet speed is already in the hero.');
-      assert.equal(await evaluate("document.querySelector('.network-connection .network-overview dd').textContent"), '10.0.0.2');
+      assert.equal(await evaluate("document.querySelectorAll('.network-connection .network-overview dt').length"), 0);
+      assert.equal(await evaluate("document.querySelector('.network-traffic').hidden"), false);
+      await evaluate(`window.__test.networkStats = {
+        id: 'ethernet', macAddress: 'AABBCCDDEEFF', ipv4Addresses: ['10.0.0.2'], ssid: null,
+        gateway: '10.0.0.1', ping: 2, received: 2048, sent: 1024,
+      }; window.__refreshNetworkStats()`);
+      assert.equal(await evaluate("document.getElementById('network-title').textContent"), 'Ethernet');
+      assert.deepEqual(await evaluate("Object.fromEntries([...document.querySelectorAll('.network-traffic dt')].map(node => [node.textContent, node.nextElementSibling.textContent]))"), {
+        Ping: '2 ms', 'Link rate': '2.5 Gb/s', Receiving: '--', Sending: '--',
+        Downloaded: '2.0 KB', Uploaded: '1.0 KB', IP: '10.0.0.2', Gateway: '10.0.0.1',
+      });
+      await evaluate(`window.__test.networkStats.received += 4096;
+        window.__test.networkStats.sent += 2048; window.__refreshNetworkStats()`);
+      for (const label of ['Receiving', 'Sending']) {
+        assert.match(await evaluate(`[...document.querySelectorAll('.network-traffic dt')]
+          .find(node => node.textContent === ${JSON.stringify(label)}).nextElementSibling.textContent`), /B\/s$/);
+      }
       assert.equal(await evaluate("document.querySelector('.network-diagnostics')"), null);
       await evaluate(`window.__test.data.network = { defaultInterface: null, interfaces: [] }; window.__test.notify()`);
       assert.equal(await evaluate("document.getElementById('network-title').textContent"), 'No physical connection');
@@ -1245,10 +1260,39 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert(overflow.body <= overflow.height && overflow.width <= overflow.clientWidth,
         JSON.stringify(overflow));
     });
+    await t.test('Wi-Fi and Ethernet keep full-length IPv4 addresses on one line within each column', async () => {
+      await load('network');
+      for (const type of ['wifi', 'ethernet']) {
+        await evaluate(`window.__test.data.network = { defaultInterface: {
+          name: 'Adapter', type: ${JSON.stringify(type)}, macAddress: '00:11:22:33:44:55',
+          ipv4Addresses: ['255.255.255.255'], receiveSpeed: 1e9,
+        } }; window.__test.notify();
+        window.__test.networkStats = { ipv4Addresses: ['255.255.255.255'],
+          gateway: '255.255.255.254' }; window.__refreshNetworkStats()`);
+        const addresses = await evaluate(`['IP', 'Gateway'].map(label => {
+          const caption = [...document.querySelectorAll('.network-traffic dt')].find(node => node.textContent === label);
+          const value = caption.nextElementSibling;
+          const button = value.querySelector('button');
+          const range = document.createRange();
+          range.selectNodeContents(button);
+          return {
+            text: button.textContent, lines: range.getClientRects().length,
+            fits: button.getBoundingClientRect().left >= value.getBoundingClientRect().left - 0.5 &&
+              button.getBoundingClientRect().right <= value.getBoundingClientRect().right + 0.5 &&
+              caption.getBoundingClientRect().right < button.getBoundingClientRect().left,
+          };
+        })`);
+        assert.deepEqual(addresses, [
+          { text: '255.255.255.255', lines: 1, fits: true },
+          { text: '255.255.255.254', lines: 1, fits: true },
+        ], type);
+        assert.equal(await evaluate("document.querySelector('#system-content').scrollWidth <= document.querySelector('#system-content').clientWidth"), true);
+      }
+    });
     await t.test('network updates retain focused address and native flyout buttons', async () => {
       await load('network');
       await evaluate('window.__refreshNetworkStats()');
-      for (const label of ['IP Address', 'Gateway']) {
+      for (const label of ['IP', 'Gateway']) {
         await evaluate(`window.__focusedAddress = [...document.querySelectorAll('.network-traffic dt')]
           .find(node => node.textContent === ${JSON.stringify(label)}).nextElementSibling.querySelector('button');
           window.__focusedAddress.focus();`);
@@ -1273,7 +1317,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert.equal(await evaluate("document.getElementById('network-title').textContent"), 'Selected Wi-Fi');
       const entries = await evaluate("Object.fromEntries([...document.querySelectorAll('.network-traffic dt')].map(node => [node.textContent, node.nextElementSibling.textContent]))");
       assert.equal(entries.Gateway, '192.168.1.1');
-      assert.equal(entries['IP Address'], '192.168.1.2');
+      assert.equal(entries.IP, '192.168.1.2');
       assert.equal(entries.Downloaded, '1.0 KB');
       await evaluate(`window.__test.data.network.interfaces[0].macAddress = 'aa:bb:cc:dd:ee:ff';
         window.__test.data.network.interfaces[0].ipv4Addresses = ['10.0.0.2'];
@@ -1283,7 +1327,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       assert.equal(await evaluate("[...document.querySelectorAll('.network-traffic dt')].find(node => node.textContent === 'Gateway').nextElementSibling.textContent"), '--');
       await evaluate('window.__refreshNetworkStats()');
       assert.equal(await evaluate("document.getElementById('network-title').textContent"), 'Wrong Wi-Fi');
-      assert.equal(await evaluate("[...document.querySelectorAll('.network-traffic dt')].find(node => node.textContent === 'IP Address').nextElementSibling.textContent"), '10.0.0.2');
+      assert.equal(await evaluate("[...document.querySelectorAll('.network-traffic dt')].find(node => node.textContent === 'IP').nextElementSibling.textContent"), '10.0.0.2');
       assert.equal(await evaluate("[...document.querySelectorAll('.network-traffic dt')].find(node => node.textContent === 'Receiving').nextElementSibling.textContent"), '--',
         'A new interface starts a fresh rate baseline.');
     });

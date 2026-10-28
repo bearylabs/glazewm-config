@@ -1,6 +1,8 @@
+import { isVirtual } from './network-model.mjs';
+
 export const networkStatsCommand = `$ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
-$nics = @([System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() | Where-Object { $_.OperationalStatus -eq 'Up' -and $_.NetworkInterfaceType -eq 'Wireless80211' })
+$nics = @([System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() | Where-Object { $_.OperationalStatus -eq 'Up' -and $_.NetworkInterfaceType -in @('Wireless80211', 'Ethernet', 'FastEthernetT', 'FastEthernetFx', 'GigabitEthernet') })
 $ssids = @{}
 $interfaceId = $null
 foreach ($line in (& netsh.exe wlan show interfaces)) {
@@ -31,7 +33,7 @@ export function networkStatsValid(snapshot) {
     Number.isFinite(snapshot.received) && snapshot.received >= 0 && Number.isFinite(snapshot.sent) && snapshot.sent >= 0;
 }
 export function networkStatsMatch(snapshot, iface) {
-  if (!snapshot || !iface || !/wifi|wireless|802\.11/i.test(iface.type ?? '')) return false;
+  if (!snapshot || !iface || isVirtual(iface) || !/wifi|wireless|802\.11|ethernet/i.test(iface.type ?? '')) return false;
   const normalizeId = value => String(value ?? '').replace(/[{}]/g, '').toLowerCase();
   if (normalizeId(snapshot.id) === normalizeId(iface.name) && snapshot.id) return true;
   const mac = value => String(value ?? '').replace(/[:-]/g, '').toLowerCase();

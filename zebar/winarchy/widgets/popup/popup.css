@@ -248,7 +248,7 @@ html[data-popup-type='globalprotect'] .network-vpn[data-connected='false'] .netw
 .network-details > div { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 20px; align-items: baseline; }
 .panel .network-details dt { color: color-mix(in srgb, var(--text) 60%, transparent); font-size: 11px; }
 .panel .network-details dd { min-width: 0; margin: 0; color: var(--text); font-size: 11px; text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
-.panel .network-copy { display: inline; padding: 0; margin: 0; border: 0; border-radius: 0; background: transparent; color: inherit; font: inherit; text-align: inherit; overflow-wrap: inherit; cursor: copy; }
+.panel .network-copy { display: inline; padding: 0; margin: 0; border: 0; border-radius: 0; background: transparent; color: inherit; font: inherit; text-align: inherit; white-space: nowrap; cursor: copy; }
 .panel .network-copy:hover { background: transparent; color: var(--accent); text-decoration: underline; }
 .panel .network-copy:focus-visible { outline: 1px solid var(--audio-outline); outline-offset: 2px; }
 .network-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 20px; }

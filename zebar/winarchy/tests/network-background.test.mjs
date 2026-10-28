@@ -21,10 +21,12 @@ function execFixture() {
   };
   return { calls, exec };
 }
-test('background poller updates traffic and VPN without any open popup or radio queries', async () => {
+for (const type of ['wifi', 'ethernet']) {
+test(`background poller updates ${type} traffic and VPN without any open popup or radio queries`, async () => {
   const storage = store(); let time = 1000; let tick; let canceled = false;
   const { exec, calls } = execFixture();
-  const stop = startNetworkBackground(exec, () => network, { storage, locks: testLocks(), now: () => time, schedule: (fn, delay) => { assert.equal(delay, 30000); tick = fn; return 1; }, cancel: () => { canceled = true; } });
+  const selectedNetwork = { ...network, defaultInterface: { ...network.defaultInterface, type } };
+  const stop = startNetworkBackground(exec, () => selectedNetwork, { storage, locks: testLocks(), now: () => time, schedule: (fn, delay) => { assert.equal(delay, 30000); tick = fn; return 1; }, cancel: () => { canceled = true; } });
   await settle();
   assert.equal(calls.length, 2);
   time += 30000; tick(); await settle();
@@ -40,6 +42,7 @@ test('background poller updates traffic and VPN without any open popup or radio 
   await settle();
   assert.equal(readBackgroundSnapshot('winarchy.network.vpn.v1', vpnSnapshotValid, storage, time), null);
 });
+}
 test('multiple monitor bars elect one poller and a remaining bar can take over', async () => {
   const storage = store(); const { exec, calls } = execFixture(); let tick2;
   const options = { storage, locks: testLocks(), now: () => 1000, schedule: () => 1, cancel: () => {} };
