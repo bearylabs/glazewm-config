@@ -350,7 +350,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
       if (url.pathname === '/widgets/bar/bar.mjs') {
         source = source.replace('const powerTimer = setInterval(refreshPower, 10000);',
           'window.__refreshPower = refreshPower; const powerTimer = setInterval(refreshPower, 10000);')
-          .replace('const updateBarZOrder =', 'window.__refreshAwake = awakeControl.refresh; window.__refreshDnd = dndControl.refresh; window.__refreshNightLight = nightLightControl.refresh; const updateBarZOrder =');
+          .replace('const providers =', 'window.__refreshAwake = awakeControl.refresh; window.__refreshDnd = dndControl.refresh; window.__refreshNightLight = nightLightControl.refresh; const providers =');
       }
       if (url.pathname === '/widgets/shared/battery-model.mjs') {
         source = source.replaceAll('timeout: 15000', 'timeout: window.__test.powerQueryTimeout ?? 15000');

@@ -425,6 +425,7 @@ export async function initialisePopup(render, reportError) {
       // Hidden WebViews can suspend requestAnimationFrame. Show the native
       // window while CSS keeps it transparent, then reveal the resized frame.
       await widget.tauriWindow.show();
+      await widget.setZOrder('top_most');
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       if (request?.requestId !== next.requestId) throw new Error('Popup request was superseded.');
       document.documentElement.setAttribute('data-popup-ready', 'true');

@@ -31,7 +31,7 @@ logout and lock permissions.
 
 ## Bar background
 
-The bar uses Catppuccin Mocha Base (`#1e1e2e`). Its native window stays topmost so neighboring window shadows cannot darken the background when focus changes. GlazeWM fullscreen temporarily switches it to the normal layer so fullscreen can still cover the bar. Left-side workspace and tiling-direction controls do not highlight on mouseover; focused-workspace indicators and keyboard-focus outlines remain unchanged. Restart Zebar after changing the initial layer in `zpack.json`.
+The bar uses Catppuccin Mocha Base (`#1e1e2e`) and the normal native window layer, so browser/video and GlazeWM fullscreen can cover it without custom fullscreen detection or layer switching. It does not dock or reserve Windows work area. GlazeWM alone keeps tiled windows below it with a DPI-scaled `gaps.outer_gap.top` of `28px`, matching the bar height; fullscreen ignores that gap. Floating and unmanaged windows can cover the bar if moved over it. Window shadows may fall over the bar because it is deliberately not topmost. Left-side workspace and tiling-direction controls do not highlight on mouseover; focused-workspace indicators and keyboard-focus outlines remain unchanged. Restart Zebar and reload GlazeWM configuration after changing the layer, docking or gap settings.
 
 ## PowerToys Awake toggle
 
@@ -88,7 +88,7 @@ snapshot is not overwritten. Restart Zebar to load the exact shell permissions.
 
 Restart Zebar after updating. Bar startup preloads one native popup WebView and all its modules in the background. It starts as a transparent, nonfocused 1px surface outside the entire virtual desktop, then hides itself without rendering providers or waiting for animation frames. All monitor bars share one startup lock and cache, so they do not create duplicate windows. Once startup finishes, even the first click reuses the loaded WebView. A click during startup waits for completion; if prewarming fails, a real click retries normally.
 
-Subsequent openings, type changes and moves between monitor bars reuse the same WebView. Closing hides the window instead of destroying it. One hidden WebView stays alive until Zebar exits. No extra npm build or local SDK bundle is needed.
+Subsequent openings, type changes and moves between monitor bars reuse the same WebView. Every opening reasserts the native topmost layer after showing the window, without stealing focus, so reused popups stay above ordinary and floating windows. Closing hides the window instead of destroying it. One hidden WebView stays alive until Zebar exits. No extra npm build or local SDK bundle is needed.
 
 Each opening gets fresh content and a new request ID. Hiding or replacing a session stops its providers, timers, sizing observer and storage/resize listeners; no popup polling continues while hidden. Provider unsubscriptions finish before the next session subscribes to the same config. Stale focus/outside-click requests cannot dismiss a replacement, and a destroyed or failed cached window is recreated on the next click. The native window is shown while CSS is still transparent before waiting for paint, because hidden WebViews can suspend animation frames.
 

@@ -11,7 +11,7 @@
     {
       "name": "bar",
       "htmlPath": "./widgets/bar/index.html",
-      "zOrder": "top_most",
+      "zOrder": "normal",
       "shownInTaskbar": false,
       "focused": false,
       "resizable": false,
@@ -84,7 +84,7 @@
             "type": "all"
           },
           "dockToEdge": {
-            "enabled": true,
+            "enabled": false,
             "edge": "top",
             "windowMargin": "0px"
           }

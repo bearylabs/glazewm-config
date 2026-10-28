@@ -4,7 +4,6 @@ import { batteryIndicator, queryPowerStatus } from '../shared/battery-model.mjs'
 import { createIcon, createBatteryIcon } from '../shared/icons.mjs';
 import { startNetworkBackground } from '../shared/network-background.mjs';
 import { startBluetoothBackground } from '../shared/bluetooth-background.mjs';
-import { createBarZOrder } from '../shared/bar-z-order.mjs';
 import { createAudioOwner } from '../shared/audio-bridge.mjs';
 import { readSnapshot, vpnSnapshotValid } from '../shared/snapshot-cache.mjs';
 import { shellQuery } from '../shared/native-query.mjs';
@@ -84,9 +83,6 @@ const nightLightControl = attachBarToggle(document.getElementById('night-light-t
     : state.enabled ? 'Windows Night light -- on. Turn off'
     : 'Windows Night light -- off. Turn on',
 });
-const updateBarZOrder = createBarZOrder(
-  order => zebar.currentWidget().setZOrder(order), reportPopupError,
-);
 import('../shared/popup-controller.mjs').then(({ attachPopupTriggers }) => {
   attachPopupTriggers(
     [...document.querySelectorAll('[data-popup-trigger]')].map(trigger => ({
@@ -179,7 +175,6 @@ providers.onOutput(output => {
   renderVolume(output.audio);
   renderNetwork(output.network);
   glazewm = output.glazewm;
-  updateBarZOrder(glazewm);
   renderWorkspaces(glazewm);
   renderModes(glazewm);
   renderSplit(glazewm);

@@ -14,11 +14,11 @@ const monitor = (x, y, width, height, scaleFactor = 1, name = 'display') => ({
   name, position: { x, y }, size: { width, height }, scaleFactor,
 });
 
-test('popup owns only active control privileges without changing bar docking', async () => {
+test('popup owns only active control privileges while the bar stays undocked', async () => {
   const pack = JSON.parse(await readFile(new URL('../zpack.json', import.meta.url), 'utf8'));
   const bar = pack.widgets.find(widget => widget.name === 'bar');
   const popup = pack.widgets.find(widget => widget.name === 'popup');
-  assert.equal(bar.zOrder, 'top_most', 'Ordinary window shadows must stay below the bar.');
+  assert.equal(bar.zOrder, 'normal', 'Fullscreen must cover the bar without layer switching.');
   assert(popup, 'Popup must be a top-level widget.');
   assert.equal(popup.focused, false, 'Background prewarming must not steal focus.');
   assert.equal(popup.shownInTaskbar, false);
@@ -45,7 +45,7 @@ test('popup owns only active control privileges without changing bar docking', a
   });
   assert.equal(popup.privileges.shellCommands.length, 7);
   assert.equal(bar.presets[0].height, '28px');
-  assert.equal(bar.presets[0].dockToEdge.enabled, true);
+  assert.equal(bar.presets[0].dockToEdge.enabled, false);
   assert.deepEqual(bar.presets[0].monitorSelection, { type: 'all' });
   assert.equal(bar.privileges.shellCommands.length, 5);
   const powerStatus = bar.privileges.shellCommands[0];
@@ -638,7 +638,14 @@ async function popupHarness(initiallyFocused = false, type = 'calendar', layoutO
   });
   const controller = await loadController(context, {
     'https://esm.sh/zebar@3.3.1': {
-      currentWidget: () => ({ id: 'popup-1', packId: 'winarchy', tauriWindow: nativeWindow }),
+      currentWidget: () => ({
+        id: 'popup-1', packId: 'winarchy', tauriWindow: nativeWindow,
+        setZOrder: async order => {
+          assert.equal(order, 'top_most');
+          assert(visible, 'Reassert topmost after showing the native window.');
+          lifecycle.push('topmost');
+        },
+      }),
       shellSpawn: async () => { throw new Error('Popups must reuse the bar helper, never spawn PowerShell.'); },
     },
     'https://esm.sh/@tauri-apps/api@2.0.2/window': {
@@ -823,7 +830,7 @@ test('native positioning rounds fractional physical coordinates at mixed DPI', a
 
 test('popup stays transparent until native sizing and the resized frame are ready', async () => {
   const popup = await popupHarness();
-  assert.deepEqual(popup.lifecycle, ['position', 'size', 'size', 'position', 'show', 'frame', 'frame', 'visible', 'ready']);
+  assert.deepEqual(popup.lifecycle, ['position', 'size', 'size', 'position', 'show', 'topmost', 'frame', 'frame', 'visible', 'ready']);
   const css = await readFile(new URL('../widgets/popup/popup.css', import.meta.url), 'utf8');
   const initialBody = css.match(/\nbody \{([\s\S]*?)\n\}/)?.[1];
   assert.match(initialBody, /background: transparent/);
@@ -831,6 +838,13 @@ test('popup stays transparent until native sizing and the resized frame are read
   assert.match(initialBody, /opacity: 0/);
   assert.match(initialBody, /pointer-events: none/);
   assert.match(css, /html\[data-popup-ready='true'\] body/);
+  assert.deepEqual(popup.errors, []);
+});
+
+test('every reused popup opening raises its native layer without focus calls', async () => {
+  const popup = await popupHarness();
+  for (const type of ['audio', 'calendar', 'network']) await popup.reopen(type);
+  assert.equal(popup.lifecycle.filter(event => event === 'topmost').length, 4);
   assert.deepEqual(popup.errors, []);
 });
 
