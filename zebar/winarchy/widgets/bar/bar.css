@@ -78,13 +78,8 @@ button:focus-visible { outline: 1px solid var(--ctp-lavender); outline-offset: -
   transition: background-color 120ms ease, color 120ms ease;
 }
 .workspace.is-active { color: var(--ctp-subtext0); }
-.ws-v1 .workspace.is-focused {
+.workspace.is-focused {
   color: var(--ctp-lavender);
-  font-weight: 600;
-}
-.ws-v2 .workspace.is-focused { color: var(--ctp-text); font-weight: 600; }
-.ws-v3 .workspace.is-focused {
-  color: var(--ctp-text);
   font-weight: 600;
 }
 .modes { display: flex; align-items: center; gap: 2px; }

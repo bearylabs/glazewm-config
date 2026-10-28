@@ -4,7 +4,7 @@ import { batteryIndicator, batteryDetails, batteryCapacityArgs, batteryCapacityA
 import { createShellQueryExecutor } from '../widgets/shared/shell-query.mjs';
 import { readFile } from 'node:fs/promises';
 
-test('screenshot details use real units and explicit missing values', () => {
+test('battery details use real units and explicit missing values', () => {
   assert.deepEqual(batteryDetails({ isCharging: true, timeTillFull: 960000, cycleCount: 93, powerConsumption: 16.4 }, 38), [
     ['Battery size', '38Wh'], ['Time to full', '16m'], ['Charge cycles', '93'], ['Charging', '16.4W'],
   ]);

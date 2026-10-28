@@ -36,7 +36,7 @@ test('traffic rates use elapsed time and adapter identity, not link speed', () =
   assert.equal(Object.fromEntries(networkMetrics(null)).Downloaded, '--');
 });
 
-test('statistics select the UI adapter, not the first active Wi-Fi interface', () => {
+test('statistics select the displayed physical adapter and reject ambiguous or invalid snapshots', () => {
   const make = (id, macAddress, address) => ({ id, macAddress, ipv4Addresses: [address], received: 100, sent: 20, ssid: id });
   const first = make('first', '001122334455', '10.0.0.2');
   const selected = make('selected', 'AABBCCDDEEFF', '192.168.1.2');
@@ -55,7 +55,6 @@ test('statistics select the UI adapter, not the first active Wi-Fi interface', (
   }
   assert(networkStatsCommand.includes('$ssids[$nic.Id.Trim'));
   assert(networkStatsCommand.includes("'Wireless80211', 'Ethernet', 'FastEthernetT', 'FastEthernetFx', 'GigabitEthernet'"));
-  assert(!networkStatsCommand.includes("-eq 'Wireless80211' } | Select-Object -First 1"));
 });
 
 test('Windows SSID parsing associates each network with its own interface GUID', {

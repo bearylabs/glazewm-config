@@ -57,7 +57,10 @@ async function fixture() {
     },
     '../shared/network-background.mjs': { readBackgroundSnapshot: () => null },
     '../shared/popup-session.mjs': { onPopupSessionEnd: callback => { cleanup = callback; } },
-    '../shared/icons.mjs': { createIcon: () => new Element() },
+    '../shared/icons.mjs': {
+      createIcon: () => new Element(),
+      createExternalLinkIcon: () => new Element(),
+    },
   };
   const context = vm.createContext({
     document: { createElement: () => new Element(), createElementNS: () => new Element() },

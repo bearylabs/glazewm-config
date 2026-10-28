@@ -15,8 +15,10 @@ session DOM and starts the calendar or system dispatcher.
 
 `widgets/popup/system.mjs` dispatches to the individual Audio, Network, Battery,
 Bluetooth, Display and GlobalProtect renderers. Shared popup DOM helpers live in
-`dom.mjs`; `providers.mjs` handles session-scoped provider subscriptions. Models,
-native bridges, caches and window lifecycle helpers remain under `widgets/shared`.
+`dom.mjs`; shared SVG icons, including the Network/GlobalProtect external-link
+arrow, live in `widgets/shared/icons.mjs`. `providers.mjs` handles session-scoped
+provider subscriptions. Models, native bridges, caches and window lifecycle
+helpers remain under `widgets/shared`.
 All assets are included by the existing widget file globs; no build step is needed.
 
 After changing a native command, run `node scripts\sync-winarchy-permissions.mjs`

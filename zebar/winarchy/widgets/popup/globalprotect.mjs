@@ -4,7 +4,7 @@ import { retainPopupDuringInteraction } from '../shared/popup-controller.mjs';
 import { readSnapshot, writeSnapshot, clearSnapshot, vpnSnapshotValid } from '../shared/snapshot-cache.mjs';
 import { readBackgroundSnapshot } from '../shared/network-background.mjs';
 import { onPopupSessionEnd } from '../shared/popup-session.mjs';
-import { createIcon } from '../shared/icons.mjs';
+import { createIcon, createExternalLinkIcon } from '../shared/icons.mjs';
 import { shellQuery } from '../shared/native-query.mjs';
 
 // A timed-out native mutation may still run after this render session ends.
@@ -43,19 +43,7 @@ export function renderGlobalProtect(root, reportError) {
   const open = document.createElement('button');
   open.id = 'globalprotect-open';
   open.type = 'button';
-  const openIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  openIcon.setAttribute('viewBox', '0 0 24 24');
-  openIcon.setAttribute('aria-hidden', 'true');
-  openIcon.setAttribute('focusable', 'false');
-  const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  arrow.setAttribute('d', 'M6 18 18 6M6 6h12v12');
-  arrow.setAttribute('fill', 'none');
-  arrow.setAttribute('stroke', 'currentColor');
-  arrow.setAttribute('stroke-width', '2');
-  arrow.setAttribute('stroke-linecap', 'round');
-  arrow.setAttribute('stroke-linejoin', 'round');
-  openIcon.append(arrow);
-  open.append(openIcon);
+  open.append(createExternalLinkIcon());
   open.className = 'network-vpn__open';
   open.setAttribute('aria-label', 'Open GlobalProtect client');
   open.title = 'Open GlobalProtect client';

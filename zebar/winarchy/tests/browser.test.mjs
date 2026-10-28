@@ -36,12 +36,6 @@ const mocks = `
       }],
     },
     battery: null,
-    cpu: { vendor: 'Test CPU', usage: 38, frequency: 3200, physicalCoreCount: 4, logicalCoreCount: 8 },
-    memory: { usedMemory: 4 * 1024 ** 3, totalMemory: 16 * 1024 ** 3, usage: 25 },
-    disk: { disks: [
-      { mountPoint: 'C:', name: 'System', totalSpace: { bytes: 100 * 1024 ** 3 }, availableSpace: { bytes: 20 * 1024 ** 3 } },
-      { mountPoint: 'D:', name: 'Data', totalSpace: { bytes: 200 * 1024 ** 3 }, availableSpace: { bytes: 100 * 1024 ** 3 } },
-    ] },
   };
   data.audio.playbackDevices = [data.audio.defaultPlaybackDevice,
     { deviceId: '{0.0.0.00000000}.{12345678-1234-1234-1234-123456789abc}', name: 'Headphones (Jabra)', volume: 27, isMuted: false },
@@ -77,9 +71,6 @@ const mocks = `
     [...data.audio.playbackDevices, ...data.audio.recordingDevices].find(device => device.deviceId === options.deviceId).isMuted = muted;
     notify();
   };
-  export function currentWidget() {
-    return { setZOrder: async order => calls.push(['z-order', order]) };
-  }
   export function createProviderGroup(config) {
     if (location.pathname.includes('/popup/') && config.audio) throw new Error('Popup must not own native audio');
     const owned = [];
@@ -159,6 +150,9 @@ const mocks = `
         onExit: callback => { handlers.exit = callback; },
       };
     }
+    if (program !== 'explorer.exe' || args.length !== 1 || args[0] !== 'ms-availablenetworks:') {
+      throw new Error('Unexpected shell spawn: ' + program + ' ' + args.join(' '));
+    }
     calls.push(['shell-spawn', program, args]);
     if (window.__test.failShellSpawn) throw new Error('Process launch failed');
     return { processId: 123 };
@@ -202,7 +196,7 @@ const mocks = `
       if (window.__test.failAwakeStatus) return { code: 1, stderr: 'Awake status unavailable' };
       return { code: 0, stdout: JSON.stringify(window.__test.awake) };
     }
-    if (window.__holdNetwork && program === 'powershell.exe' && /GlobalProtectButton|GetRadiosAsync|GetIPv4Statistics/.test(args[3] ?? '')) {
+    if (window.__holdNetwork && program === 'powershell.exe' && /GlobalProtectButton|GetIPv4Statistics/.test(args[3] ?? '')) {
       while (window.__holdNetwork) await new Promise(resolve => setTimeout(resolve, 20));
     }
     if (program === 'powershell.exe' && args[3]?.includes('[AudioOutput]::Select')) {
@@ -247,10 +241,13 @@ const mocks = `
     }
     if (program === 'powershell.exe' && args[3]?.includes('BatteryFullChargedCapacity')) return window.__test.failBatteryCapacity
       ? { code: 1, stderr: 'Capacity access denied' } : { code: 0, stdout: '38000', stderr: '' };
-    if (program === 'powershell.exe') return {
+    if (program === 'powershell.exe' && args[3]?.includes('[System.Windows.Forms.SystemInformation]::PowerStatus')) return {
       code: 0, stdout: JSON.stringify(window.__test.powerStatus ?? { ac: 'Online', charge: 0.8, battery: 'High' }),
     };
-    calls.push(['shell', program, args]); return { code: 0 };
+    if (program === 'explorer.exe' && args.length === 1 && args[0] === 'ms-settings:bluetooth') {
+      calls.push(['shell', program, args]); return { code: 0 };
+    }
+    throw new Error('Unexpected shell command: ' + program + ' ' + args.join(' '));
   }
   export async function availableMonitors() {
     if (window.__test.monitors) return window.__test.monitors;
@@ -664,21 +661,16 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
     });
     await t.test('focused workspace uses the same underline as open popups', async () => {
       await load('bar');
-      const results = await evaluate(`(() => {
+      const result = await evaluate(`(() => {
         const trigger = document.getElementById('display-trigger');
         trigger.setAttribute('aria-expanded', 'true');
         const properties = ['content', 'bottom', 'width', 'height', 'backgroundColor', 'transform', 'pointerEvents'];
         const style = node => properties.map(key => getComputedStyle(node, '::after')[key]);
-        return ['ws-v1', 'ws-v2', 'ws-v3'].map(variant => {
-          document.body.className = variant;
-          return { workspace: style(document.querySelector('.workspace.is-focused')),
-            popup: style(trigger), inactive: getComputedStyle(document.querySelector('.workspace:not(.is-focused)'), '::after').content };
-        });
+        return { workspace: style(document.querySelector('.workspace.is-focused')),
+          popup: style(trigger), inactive: getComputedStyle(document.querySelector('.workspace:not(.is-focused)'), '::after').content };
       })()`);
-      for (const result of results) {
-        assert.deepEqual(result.workspace, result.popup);
-        assert.equal(result.inactive, 'none');
-      }
+      assert.deepEqual(result.workspace, result.popup);
+      assert.equal(result.inactive, 'none');
     });
     await t.test('center and right triggers only underline while their popup is open', async () => {
       await load('bar');
@@ -1650,11 +1642,7 @@ test('real Edge renders bar and all popup controls using mocked native APIs', { 
         assert.equal(await evaluate("document.querySelector('.hero__value').textContent"), '—');
         assert.equal(await evaluate("document.querySelector('.battery-progress') === null"), true);
       }
-      await evaluate(`window.__test.errors.battery = 'Battery unavailable';
-        window.__test.data.disk.disks = Array.from({ length: 30 }, () => ({
-          mountPoint: 'C:', name: 'Long disk name '.repeat(40), totalSpace: { bytes: 1024 ** 3 },
-          availableSpace: { bytes: 512 * 1024 ** 2 },
-        })); window.__test.notify()`);
+      await evaluate(`window.__test.errors.battery = 'Battery unavailable'; window.__test.notify()`);
       assert.match(await evaluate("document.querySelector('.power-stats .error').textContent"), /Battery unavailable/);
       const overflow = await evaluate(`(() => {
         const panel = document.getElementById('system-content');

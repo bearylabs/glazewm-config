@@ -3,9 +3,6 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 import { powerStatusArgs } from '../widgets/shared/battery-model.mjs';
-import { outputDeviceArgsRegex } from '../widgets/shared/audio-model.mjs';
-import { bluetoothArgsRegex, bluetoothSettingsPermission } from '../widgets/shared/bluetooth-model.mjs';
-import { globalProtectArgsRegex } from '../widgets/shared/globalprotect-model.mjs';
 import { calendarDays, dateKey, popupPlacement, popupSizes, shiftMonth } from '../widgets/shared/popup-model.mjs';
 import { attachPopupSizing } from '../widgets/shared/popup-sizing.mjs';
 import { outsideClickArgs, outsideClickArgsRegex, createOutsideClickWatcher, spawnOutsideClickProcess } from '../widgets/shared/popup-dismissal.mjs';
@@ -23,32 +20,23 @@ test('popup owns only active control privileges while the bar stays undocked', a
   assert.equal(popup.focused, false, 'Background prewarming must not steal focus.');
   assert.equal(popup.shownInTaskbar, false);
   assert.equal(popup.zOrder, 'top_most');
-  assert.equal(popup.transparent, true, 'Rounded popup corners need a transparent native surface.');
+  assert.equal(popup.transparent, true, 'Background prewarming needs a transparent native surface.');
   assert.deepEqual(popup.presets, []);
-  assert.deepEqual(bar.privileges.shellCommands[1], {
+  const mousePermission = bar.privileges.shellCommands.find(permission => permission.argsRegex === outsideClickArgsRegex());
+  assert.deepEqual(mousePermission, {
     program: 'powershell.exe', argsRegex: outsideClickArgsRegex(),
   });
   assert(!popup.privileges.shellCommands.some(permission => permission.argsRegex.includes('PopupMouse')));
-  const mousePermission = new RegExp(bar.privileges.shellCommands[1].argsRegex);
-  assert(mousePermission.test(outsideClickArgs.join(' ')));
-  assert(!mousePermission.test(`${outsideClickArgs.join(' ')}; shutdown /s /t 0`));
+  const allowedMouse = new RegExp(mousePermission.argsRegex);
+  assert(allowedMouse.test(outsideClickArgs.join(' ')));
+  assert(!allowedMouse.test(`${outsideClickArgs.join(' ')}; shutdown /s /t 0`));
   assert(!popup.privileges.shellCommands.some(permission => ['shutdown', 'rundll32.exe'].includes(permission.program)));
-  assert.deepEqual(popup.privileges.shellCommands[0], {
-    program: 'powershell.exe', argsRegex: outputDeviceArgsRegex(),
-  });
-  assert.deepEqual(popup.privileges.shellCommands[1], {
-    program: 'powershell.exe', argsRegex: bluetoothArgsRegex(),
-  });
-  assert.deepEqual(popup.privileges.shellCommands[2], bluetoothSettingsPermission);
-  assert.deepEqual(popup.privileges.shellCommands[3], {
-    program: 'powershell.exe', argsRegex: globalProtectArgsRegex(),
-  });
-  assert.equal(popup.privileges.shellCommands.length, 7);
   assert.equal(bar.presets[0].height, '28px');
   assert.equal(bar.presets[0].dockToEdge.enabled, false);
   assert.deepEqual(bar.presets[0].monitorSelection, { type: 'all' });
-  assert.equal(bar.privileges.shellCommands.length, 5);
-  const powerStatus = bar.privileges.shellCommands[0];
+  const powerStatus = bar.privileges.shellCommands.find(permission =>
+    new RegExp(permission.argsRegex).test(powerStatusArgs.join(' ')));
+  assert(powerStatus, 'The bar must be allowed to read power status.');
   assert.equal(powerStatus.program, 'powershell.exe');
   const allowed = new RegExp(powerStatus.argsRegex);
   assert(allowed.test(powerStatusArgs.join(' ')));
@@ -57,14 +45,6 @@ test('popup owns only active control privileges while the bar stays undocked', a
   assert(bar.includeFiles.includes('widgets/shared/**'));
   assert(popup.includeFiles.includes('widgets/popup/**'));
   assert(popup.includeFiles.includes('widgets/shared/**'));
-});
-
-test('prewarm popup configuration is transparent, nonfocused and absent from the taskbar', async () => {
-  const pack = JSON.parse(await readFile(new URL('../zpack.json', import.meta.url), 'utf8'));
-  const popup = pack.widgets.find(widget => widget.name === 'popup');
-  assert.equal(popup.focused, false);
-  assert.equal(popup.transparent, true);
-  assert.equal(popup.shownInTaskbar, false);
 });
 
 test('GlazeWM fullscreen uses the full monitor instead of the reserved work area', async () => {

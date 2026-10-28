@@ -22,26 +22,26 @@ function execFixture() {
   return { calls, exec };
 }
 for (const type of ['wifi', 'ethernet']) {
-test(`background poller updates ${type} traffic and VPN without any open popup or radio queries`, async () => {
-  const storage = store(); let time = 1000; let tick; let canceled = false;
-  const { exec, calls } = execFixture();
-  const selectedNetwork = { ...network, defaultInterface: { ...network.defaultInterface, type } };
-  const stop = startNetworkBackground(exec, () => selectedNetwork, { storage, locks: testLocks(), now: () => time, schedule: (fn, delay) => { assert.equal(delay, 30000); tick = fn; return 1; }, cancel: () => { canceled = true; } });
-  await settle();
-  assert.equal(calls.length, 2);
-  time += 30000; tick(); await settle();
-  assert.equal(calls.length, 4);
-  const traffic = readSnapshot('winarchy.network.traffic.v2', trafficSnapshotValid, storage, time);
-  assert.equal(Object.fromEntries(traffic.entries).Receiving, '1.0 KB/s');
-  assert.equal(Object.fromEntries(traffic.entries)['IP Address'], '10.0.0.2');
-  assert.equal(storage.getItem('winarchy.network.radio.v1'), null);
-  assert.deepEqual(readBackgroundSnapshot('winarchy.network.vpn.v1', vpnSnapshotValid, storage, time), { available: true, connected: false });
-  assert.equal(readBackgroundSnapshot('winarchy.network.vpn.v1', vpnSnapshotValid, storage, time + 35001), null);
-  assert.deepEqual(readSnapshot('winarchy.network.vpn.v1', vpnSnapshotValid, storage, time), { available: true, connected: false });
-  stop(); tick(); await settle(); assert(canceled); assert.equal(calls.length, 4);
-  await settle();
-  assert.equal(readBackgroundSnapshot('winarchy.network.vpn.v1', vpnSnapshotValid, storage, time), null);
-});
+  test(`background poller updates ${type} traffic and VPN without any open popup or radio queries`, async () => {
+    const storage = store(); let time = 1000; let tick; let canceled = false;
+    const { exec, calls } = execFixture();
+    const selectedNetwork = { ...network, defaultInterface: { ...network.defaultInterface, type } };
+    const stop = startNetworkBackground(exec, () => selectedNetwork, { storage, locks: testLocks(), now: () => time, schedule: (fn, delay) => { assert.equal(delay, 30000); tick = fn; return 1; }, cancel: () => { canceled = true; } });
+    await settle();
+    assert.equal(calls.length, 2);
+    time += 30000; tick(); await settle();
+    assert.equal(calls.length, 4);
+    const traffic = readSnapshot('winarchy.network.traffic.v2', trafficSnapshotValid, storage, time);
+    assert.equal(Object.fromEntries(traffic.entries).Receiving, '1.0 KB/s');
+    assert.equal(Object.fromEntries(traffic.entries)['IP Address'], '10.0.0.2');
+    assert.equal(storage.getItem('winarchy.network.radio.v1'), null);
+    assert.deepEqual(readBackgroundSnapshot('winarchy.network.vpn.v1', vpnSnapshotValid, storage, time), { available: true, connected: false });
+    assert.equal(readBackgroundSnapshot('winarchy.network.vpn.v1', vpnSnapshotValid, storage, time + 35001), null);
+    assert.deepEqual(readSnapshot('winarchy.network.vpn.v1', vpnSnapshotValid, storage, time), { available: true, connected: false });
+    stop(); tick(); await settle(); assert(canceled); assert.equal(calls.length, 4);
+    await settle();
+    assert.equal(readBackgroundSnapshot('winarchy.network.vpn.v1', vpnSnapshotValid, storage, time), null);
+  });
 }
 test('multiple monitor bars elect one poller and a remaining bar can take over', async () => {
   const storage = store(); const { exec, calls } = execFixture(); let tick2;
@@ -53,7 +53,10 @@ test('multiple monitor bars elect one poller and a remaining bar can take over',
 });
 test('background permissions allow only exact read queries, never radio or VPN actions', async () => {
   const pack = JSON.parse(await readFile(new URL('../zpack.json', import.meta.url)));
-  assert.deepEqual(pack.widgets.find(w => w.name === 'bar').privileges.shellCommands.slice(2, 4), networkBackgroundPermissions);
+  const permissions = pack.widgets.find(w => w.name === 'bar').privileges.shellCommands;
+  for (const expected of networkBackgroundPermissions) {
+    assert.deepEqual(permissions.find(permission => permission.argsRegex === expected.argsRegex), expected);
+  }
   assert.equal(networkBackgroundPermissions.length, 2);
   const vpn = new RegExp(networkBackgroundPermissions[1].argsRegex);
   assert(vpn.test(globalProtectArgs('status').join(' ')));

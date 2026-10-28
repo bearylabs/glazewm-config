@@ -7,7 +7,7 @@ test('minimal display popup uses only monitor data, without native helpers or se
   assert.match(source, /availableMonitors/);
   assert.match(source, /currentMonitor/);
   assert.doesNotMatch(source, /shellExec|shellSpawn|ms-settings|WmiMonitor|display-model/);
-  assert.doesNotMatch(source, /node\('(?:button|input|a)'/);
+  assert.doesNotMatch(source, /element\('(?:button|input|a)'/);
   const pack = JSON.parse(await readFile(new URL('../zpack.json', import.meta.url), 'utf8'));
   for (const widget of pack.widgets) {
     for (const permission of widget.privileges.shellCommands) {

@@ -8,11 +8,11 @@ import { readBackgroundSnapshot } from '../shared/network-background.mjs';
 import { onPopupSessionEnd } from '../shared/popup-session.mjs';
 import { element, button, hero, unavailable } from './dom.mjs';
 import { subscribe } from './providers.mjs';
-import { createIcon } from '../shared/icons.mjs';
+import { createIcon, createExternalLinkIcon } from '../shared/icons.mjs';
 import { shellQuery } from '../shared/native-query.mjs';
 
 function networkDetails(entries, reportError) {
-  const list = element('dl', undefined, 'network-details network-overview');
+  const list = element('dl', undefined, 'network-overview');
   const values = new Map();
   for (const [label] of networkOverviewEntries(entries)) {
     const caption = label === 'IP Address' ? 'IP' : label;
@@ -94,19 +94,7 @@ export function renderNetwork(root, reportError) {
   wifiOpen.className = 'network-vpn__open';
   wifiOpen.setAttribute('aria-label', 'Open Windows Wi-Fi networks');
   wifiOpen.title = 'Open Windows Wi-Fi networks';
-  const arrowIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  arrowIcon.setAttribute('viewBox', '0 0 24 24');
-  arrowIcon.setAttribute('aria-hidden', 'true');
-  arrowIcon.setAttribute('focusable', 'false');
-  const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  arrow.setAttribute('d', 'M6 18 18 6M6 6h12v12');
-  arrow.setAttribute('fill', 'none');
-  arrow.setAttribute('stroke', 'currentColor');
-  arrow.setAttribute('stroke-width', '2');
-  arrow.setAttribute('stroke-linecap', 'round');
-  arrow.setAttribute('stroke-linejoin', 'round');
-  arrowIcon.append(arrow);
-  wifiOpen.append(arrowIcon);
+  wifiOpen.append(createExternalLinkIcon());
   const heading = hero('wifi-off', 'No connection', 'NETWORK DATA UNAVAILABLE');
   heading.classList.add('network-hero');
   const networkTitle = heading.querySelector('.hero__title');

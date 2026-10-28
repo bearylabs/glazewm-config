@@ -149,7 +149,7 @@ async function refreshPower() {
     const fill = powerEl.querySelector('.battery__fill');
     fill.setAttribute('height', String(fillHeight));
     fill.setAttribute('y', String(20 - fillHeight));
-    powerEl.setAttribute('aria-label', `${indicator.label}${failure ? ` — ${failure}` : ''}. Open power and system information`);
+    powerEl.setAttribute('aria-label', `${indicator.label}${failure ? ` — ${failure}` : ''}. Open battery information`);
     powerBusy = false;
   }
 }
